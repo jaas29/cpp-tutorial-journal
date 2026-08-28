@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glossary — C++ Tutorial</title>
+<meta name="description" content="Plain definitions of the terms as they come up: translation unit, stack, heap, pointer, capacity.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<style>
+  body { max-width: 44rem; padding-top: 2.5rem; }
+  dl { margin: 0; }
+  dt {
+    font-family: var(--mono);
+    font-size: 0.86rem;
+    font-weight: bold;
+    margin: 1.35rem 0 0.25rem;
+    color: var(--ink);
+  }
+  dt:first-of-type { margin-top: 0.5rem; }
+  dd { margin: 0; font-size: 0.97rem; }
+  dd .also {
+    display: block;
+    font-size: 0.83rem;
+    color: var(--ink-faint);
+    margin-top: 0.2rem;
+  }
+  .letter {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
+    color: var(--accent);
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 0.3rem;
+    margin: 2.4rem 0 1rem;
+  }
+</style>
+</head>
+<body>
+
+<p class="kicker">Glossary &middot; C++ Tutorial</p>
+<h1>Glossary</h1>
+<p class="standfirst">The working vocabulary for this tutorial. Terms are added as lessons
+introduce them, and used consistently from then on — if a lesson says
+&ldquo;translation unit&rdquo;, it means exactly what it means here.</p>
+
+<p class="letter">BUILD PIPELINE &mdash; from lesson 01</p>
+
+<dl>
+
+  <dt>preprocessor</dt>
+  <dd>The first program in the build. Does purely textual work: pastes each
+  <code>#include</code>d file in wholesale, expands macros, deletes the <code>#if</code> branches
+  that don't apply. It does not understand C++ — it has no concept of a function or a type.
+  <span class="also">Stop the build here with <code>clang++ -E</code>.</span></dd>
+
+  <dt>translation unit</dt>
+  <dd>What the preprocessor hands to the compiler: one <code>.cpp</code> file with every header it
+  included pasted in, applied recursively. This is the unit the compiler actually compiles, and it
+  is compiled <em>in complete isolation</em> from every other translation unit in your project.
+  <span class="also">The single most load-bearing term in this glossary. Most C++ file-layout rules
+  are consequences of it.</span></dd>
+
+  <dt>compiler</dt>
+  <dd>Parses and type-checks one translation unit and emits assembly for it. Knows about that one
+  file plus its headers, and nothing else in your project.
+  <span class="also"><code>clang++ -S</code>.</span></dd>
+
+  <dt>declaration</dt>
+  <dd>States that a name exists and what its type is, with no body:
+  <code>int add(int x, int y);</code>. A promise. Enough to satisfy the compiler.</dd>
+
+  <dt>definition</dt>
+  <dd>Provides the thing itself, body and all. Every name you actually use needs exactly one
+  definition somewhere in the program — no more, no fewer. Enough to satisfy the linker.
+  <span class="also">Every definition is also a declaration. The reverse is not true.</span></dd>
+
+  <dt>object file</dt>
+  <dd>A <code>.o</code> file: machine code for one translation unit, plus a symbol table recording
+  which names it <em>defines</em> and which names it still <em>needs</em>.
+  <span class="also"><code>clang++ -c</code>; inspect with <code>nm</code>.</span></dd>
+
+  <dt>symbol</dt>
+  <dd>A name as it appears in an object file's table. Functions and variables with external
+  linkage get one.</dd>
+
+  <dt>name mangling</dt>
+  <dd>The compiler encoding a function's parameter types into its symbol name, so that overloads
+  stay distinguishable at the object-file level. <code>add(int, int)</code> becomes
+  <code>__Z3addii</code>; <code>add(int, long)</code> becomes <code>__Z3addil</code>.
+  <span class="also">Decode with <code>c++filt</code>. Explains why a declaration/definition
+  signature mismatch surfaces as a missing symbol rather than a type error.</span></dd>
+
+  <dt>linker</dt>
+  <dd>The last program in the build (<code>ld</code>). Sees every object file and library at once
+  and matches each needed symbol to exactly one definition, then writes the executable. It works
+  on names and addresses only — it does not know your types or see your source.
+  <span class="also">Runs by default; there is no flag to &ldquo;stop after&rdquo; it.</span></dd>
+
+  <dt>undefined symbol</dt>
+  <dd>A name some object file uses that no object file defines. The linker's characteristic
+  failure. Not a compiler error, because the compiler was shown a declaration and believed it.</dd>
+
+  <dt>duplicate symbol</dt>
+  <dd>The opposite failure: two object files both define the same name. Usually caused by a
+  non-<code>inline</code> function or variable defined in a header that more than one
+  <code>.cpp</code> included.</dd>
+
+  <dt>AddressSanitizer (ASan)</dt>
+  <dd>A compiler-inserted runtime memory checker: catches out-of-bounds access, use-after-free,
+  double free, and some leaks, and reports the line that did it. Enabled at build time with
+  <code>-fsanitize=address</code>; costs roughly 2&ndash;3&times; runtime, so it is a debugging
+  build, never a benchmarking one.
+  <span class="also">On this machine it must be built with Homebrew clang — see
+  <a href="toolchain.html">the toolchain sheet</a>.</span></dd>
+
+  <dt>UndefinedBehaviorSanitizer (UBSan)</dt>
+  <dd>Sibling of ASan, for undefined behaviour rather than bad memory: signed overflow, invalid
+  shifts, misaligned or null dereference. <code>-fsanitize=undefined</code>. Cheap; leave it on
+  in debug builds.</dd>
+
+</dl>
+
+<footer>
+  <p>Grows with each lesson. If a lesson uses a term that is not in here, that is a bug in the
+  lesson — tell me and I will fix both.</p>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video Log &mdash; C++ Tutorial</title>
+<meta name="description" content="What I have watched, when, and what it actually explained.">
+<link rel="stylesheet" href="./assets/lesson.css">
+<link rel="stylesheet" href="./assets/journal.css">
+<style>
+  body { max-width: 50rem; }
+  table { font-size: 0.85rem; }
+  td:first-child { white-space: nowrap; font-family: var(--mono); font-size: 0.78rem;
+                   color: var(--ink-soft); }
+  .queued td:first-child { color: var(--ink-faint); }
+</style>
+</head>
+<body>
+
+<p class="kicker"><a href="./">C++ Tutorial</a> &middot; Fall 2026</p>
+<h1>Video Log</h1>
+<p class="standfirst">I learn partly by watching &mdash; a diagram being drawn while someone talks
+lands better for me than the same thing in prose. This is the record of what I have watched, when,
+and what it was actually good for. The channels are the vetted ones from
+<a href="./RESOURCES.md">RESOURCES.md</a>, not whatever the algorithm offered.</p>
+
+<div class="aside">
+<p><strong>The rule I hold to:</strong> video is for intuition,
+<a href="https://www.learncpp.com/">learncpp</a> is for style. Where a video's syntax disagrees with
+learncpp, learncpp wins. This matters most with The Cherno, who uses raw <code>new</code> and
+<code>delete</code> throughout &mdash; correct inside Project 1, where writing a container means I
+am the one doing manual memory, and not to be carried into Projects 2 and 3.</p>
+</div>
+
+<h2>Watched</h2>
+<div class="table-wrap">
+<table>
+<thead>
+<tr><th>Date</th><th>Video</th><th>Channel</th><th>What it was for</th></tr>
+</thead>
+<tbody>
+<!-- BEGIN:watched -->
+<tr><td>&mdash;</td><td colspan="3">Nothing logged yet. Entries go here as I watch them.</td></tr>
+<!-- END:watched -->
+</tbody>
+</table>
+</div>
+
+<h2>Queued, and what it pairs with</h2>
+<p>Ordered by when it becomes useful, not by interest. A video watched before the lesson that needs
+it is mostly wasted on me.</p>
+<div class="table-wrap">
+<table>
+<thead>
+<tr><th>When</th><th>Video</th><th>Channel</th><th>Pairs with</th></tr>
+</thead>
+<tbody>
+<tr class="queued"><td>P1, now</td>
+  <td><a href="https://www.youtube.com/watch?v=wJ1L2nSIV1s">Stack vs Heap Memory in C++</a></td>
+  <td>The Cherno</td>
+  <td><a href="./lessons/0005-the-heap-and-your-first-vector.html">Lesson 5</a>, Knowledge 1</td></tr>
+<tr class="queued"><td>P1, now</td>
+  <td><a href="https://www.youtube.com/watch?v=DTxHyVn0ODg">POINTERS in C++</a></td>
+  <td>The Cherno</td>
+  <td><a href="./lessons/0005-the-heap-and-your-first-vector.html">Lesson 5</a>, Knowledge 3</td></tr>
+<tr class="queued"><td>P1, now</td>
+  <td><a href="https://www.youtube.com/watch?v=NUZdUSqsCs4">The NEW Keyword in C++</a></td>
+  <td>The Cherno</td>
+  <td><a href="./lessons/0005-the-heap-and-your-first-vector.html">Lesson 5</a>, Knowledge 3</td></tr>
+<tr class="queued"><td>P1, later</td>
+  <td><a href="https://www.youtube.com/watch?v=ryRf4Jh_YC0">VECTOR / DYNAMIC ARRAY &mdash; Making
+  DATA STRUCTURES in C++</a></td>
+  <td>The Cherno</td>
+  <td><strong>Not yet.</strong> Assumes templates, move semantics and in-place construction. This
+  is the review video for <em>after</em> the destructor and copy-constructor lessons, not a
+  companion to Lesson 5.</td></tr>
+<tr class="queued"><td>P1</td>
+  <td>Herb Sutter, <em>Leak-Freedom in C++</em> (CppCon 2016)</td>
+  <td>CppCon</td>
+  <td>Ownership and lifetime, for the code-review meetings</td></tr>
+<tr class="queued"><td>P2</td>
+  <td><a href="https://www.youtube.com/watch?v=Qz0KTGYJtUk">Coding Adventure: Ray Tracing</a></td>
+  <td>Sebastian Lague</td>
+  <td>Project 2. Code is C#/Unity &mdash; watch for the geometry, implement from Shirley</td></tr>
+<tr class="queued"><td>P2</td>
+  <td><a href="https://www.youtube.com/watch?v=C1H4zIiCOaI">Optimizing a Ray Tracer (by building a
+  BVH)</a></td>
+  <td>Sebastian Lague</td>
+  <td>The BVH milestone in Project 2</td></tr>
+</tbody>
+</table>
+</div>
+
+<footer>
+  <p>Deliberately not on this list: general "C++ Full Course" channels. They teach raw pointers and
+  <code>new</code>/<code>delete</code> as the default and stop short of everything Project 1 needs.
+  The reasoning is in <a href="./RESOURCES.md">RESOURCES.md</a>.</p>
+</footer>
+
+</body>
+</html>

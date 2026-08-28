@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reference — Starting a New C++ Project</title>
+<meta name="description" content="Runbook for starting a scratch project with newcpp, plus a Visual Studio to macOS translation table.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<style>
+  /* Reference sheets run denser than lessons and want the full page width. */
+  body { max-width: 46rem; padding-top: 2.5rem; font-size: 1rem; }
+  h2 { margin-top: 2rem; }
+  table { font-size: 0.83rem; }
+  pre { font-size: 0.76rem; }
+</style>
+</head>
+<body>
+
+<p class="kicker">Reference sheet &middot; C++ Tutorial</p>
+<h1>Starting a New C++ Project</h1>
+<p class="standfirst">The same five minutes every time you want to try something &mdash; a YouTube
+tutorial, a scratch experiment, a question you want to answer with code. Do not think about it; run
+the script and start typing C++.</p>
+
+<h2>The 30-second version</h2>
+
+<pre><code>$ cd ~/projects/cpp-tutorial          # or wherever scratch work lives
+$ newcpp cherno-practice
+created cherno-practice/
+  cd cherno-practice &amp;&amp; ./build/cherno-practice
+  edit, then: cmake --build build</code></pre>
+
+<p>That already compiled and ran. <code>newcpp</code> lives at
+<code>~/.local/bin/newcpp</code>; it is a bash script, and it is meant to be edited when your
+defaults change.</p>
+
+<h2>What it made</h2>
+
+<pre><code>cherno-practice/
+├── CMakeLists.txt          C++20, -Wall -Wextra -Wpedantic, optional sanitizers
+├── .gitignore              build/, .DS_Store, compile_commands.json
+├── compile_commands.json → build/…  symlink, so clangd works in your editor
+├── include/                empty, ready for headers
+├── src/main.cpp            prints "hello"
+└── build/                  generated, disposable, never committed</code></pre>
+
+<p>Plus a git repo with one commit, so you can always get back to a working state.</p>
+
+<h2>The loop, forever after</h2>
+
+<div class="table-wrap">
+<table>
+<tr><th>You did this</th><th>Then run</th></tr>
+<tr><td>Edited a <code>.cpp</code> or <code>.hpp</code></td><td><code>cmake --build build</code></td></tr>
+<tr><td>Want to run it</td><td><code>./build/&lt;name&gt;</code></td></tr>
+<tr><td>Both, in one line</td><td><code>cmake --build build &amp;&amp; ./build/&lt;name&gt;</code></td></tr>
+<tr><td><strong>Added a new <code>.cpp</code></strong></td><td>Add it to <code>add_executable</code>, then <code>cmake --build build</code></td></tr>
+<tr><td>Added a new <code>.hpp</code></td><td>Nothing. Headers are never listed.</td></tr>
+<tr><td>Build has gone strange</td><td><code>rm -rf build &amp;&amp; cmake -B build</code> — always safe</td></tr>
+<tr><td>Want to see the real clang++ lines</td><td><code>cmake --build build -v</code></td></tr>
+</table>
+</div>
+
+<p>Make the two-command line a shell alias if you like. It is the one you type all day.</p>
+
+<h2>Turning on sanitizers</h2>
+
+<p>A second build directory, so the two never mix. Apple clang's AddressSanitizer hangs at startup
+on macOS 26, so this needs the Homebrew compiler &mdash; the generated <code>CMakeLists.txt</code>
+warns you if you forget, and adds the <code>-isysroot</code> Homebrew clang needs on its own.</p>
+
+<pre><code>$ cmake -B build-san -DSAN=ON \
+      -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++
+$ cmake --build build-san &amp;&amp; ./build-san/&lt;name&gt;</code></pre>
+
+<p>Reach for it when something is mysterious, when a crash is intermittent, or before you show code
+to anyone. Full details in <a href="./toolchain.html">the toolchain sheet</a>.</p>
+
+<h2>Following a Windows tutorial on your Mac</h2>
+
+<p>Most C++ YouTube — The Cherno included — is Visual Studio on Windows. Nothing about the C++
+changes; only the button-pressing does. Translate as you watch:</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>He says</th><th>You do</th></tr>
+<tr><td>&ldquo;Create a new project&rdquo;</td><td><code>newcpp name</code></td></tr>
+<tr><td>&ldquo;Hit F5&rdquo; / &ldquo;Local Windows Debugger&rdquo;</td><td><code>cmake --build build &amp;&amp; ./build/name</code></td></tr>
+<tr><td>&ldquo;Right-click, Add → New Item&rdquo;</td><td>Create the file, <strong>then add it to <code>add_executable</code></strong></td></tr>
+<tr><td>&ldquo;Set the configuration to Release&rdquo;</td><td><code>cmake -B build-rel -DCMAKE_BUILD_TYPE=Release</code></td></tr>
+<tr><td>&ldquo;This is the solution, this is the project&rdquo;</td><td>Solution ≈ the <code>CMakeLists.txt</code>; project ≈ one target</td></tr>
+<tr><td><code>#include "pch.h"</code>, <code>stdafx.h</code></td><td>Skip it. Visual Studio precompiled headers, not C++.</td></tr>
+<tr><td><code>system("PAUSE")</code>, <code>conio.h</code>, <code>&lt;windows.h&gt;</code></td><td>Skip. Windows-only; your terminal does not close on you.</td></tr>
+<tr><td><code>__declspec</code>, <code>WinMain</code></td><td>Skip. Not portable C++.</td></tr>
+</table>
+</div>
+
+<div class="aside">
+  <span class="label">Style warning</span>
+  Video is for intuition; learncpp is for style. Tutorial C++ leans on raw <code>new</code>/<code>delete</code>
+  and pre-C++11 habits. Inside a container that is correct and it is exactly what Project 1 asks
+  for. Outside one it is the habit that gets flagged in review.
+</div>
+
+<h2>When it does not build</h2>
+
+<div class="table-wrap">
+<table>
+<tr><th>Message</th><th>Almost always</th></tr>
+<tr><td><code>Undefined symbols … referenced from x.cpp.o</code></td><td>A <code>.cpp</code> is missing from <code>add_executable</code>. It is never the file named in the error.</td></tr>
+<tr><td><code>fatal error: 'foo.hpp' file not found</code></td><td>Wrong path in the <code>#include</code>, or the directory is missing from <code>target_include_directories</code>.</td></tr>
+<tr><td><code>No such file or directory: build</code></td><td>You never configured. <code>cmake -B build</code>.</td></tr>
+<tr><td>Editor red-underlines correct code</td><td><code>compile_commands.json</code> is stale or unlinked. Reconfigure; check the symlink exists.</td></tr>
+<tr><td>Your edit had no effect</td><td>You ran the binary without rebuilding, or you are running a binary from the other build directory.</td></tr>
+<tr><td>Sanitizer binary hangs, prints nothing</td><td>Apple clang. Reconfigure with the Homebrew compiler.</td></tr>
+</table>
+</div>
+
+<p>The longer version of this table, including how to read symbol tables, is in
+<a href="./toolchain.html">the toolchain sheet</a>.</p>
+
+<h2>Doing it by hand, without the script</h2>
+
+<p>Worth doing once so the script is not magic, and needed on any machine that has no
+<code>newcpp</code>:</p>
+
+<pre><code>mkdir -p proj/src &amp;&amp; cd proj
+printf '#include &lt;iostream&gt;\nint main(){ std::cout &lt;&lt; "hello\\n"; }\n' &gt; src/main.cpp
+
+cat &gt; CMakeLists.txt &lt;&lt;'EOF'
+cmake_minimum_required(VERSION 3.28)
+project(proj LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+add_executable(proj src/main.cpp)
+target_include_directories(proj PRIVATE include)
+target_compile_options(proj PRIVATE -Wall -Wextra -Wpedantic)
+EOF
+
+cmake -B build &amp;&amp; cmake --build build &amp;&amp; ./build/proj</code></pre>
+
+<p>And the smallest thing that works at all, when you just want to check one line of syntax and a
+project would be overkill:</p>
+
+<pre><code>clang++ -std=c++20 -Wall -Wextra scratch.cpp -o scratch &amp;&amp; ./scratch</code></pre>
+
+<p>For a single file with no headers of your own, that is genuinely fine. Reach for a project the
+moment there are two files, or you want sanitizers, or you want it to survive the afternoon. Or use
+<a href="https://godbolt.org/">Compiler Explorer</a> and skip the file entirely.</p>
+
+<footer>
+  <p>Why any of this is necessary: <a href="../lessons/0004-why-cmake-exists.html">Lesson 4 &mdash;
+  CMake Is Not a Build System</a>. Why the file list is explicit:
+  <a href="../lessons/0003-the-linker-only-sees-what-you-listed.html">Lesson 3</a>.</p>
+  <p>Related sheets: <a href="./cmake.html">CMake &amp; Sanitizer Builds</a> (the two-preset Project
+  1 setup) &middot; <a href="./toolchain.html">Toolchain</a> (error triage, sanitizer flags)
+  &middot; <a href="./glossary.html">Glossary</a>.</p>
+</footer>
+
+</body>
+</html>

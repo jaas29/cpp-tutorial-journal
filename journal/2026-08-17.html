@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>17 Aug 2026 &mdash; Four programs behind one command</title>
+<meta name="description" content="Lesson 1 and the glossary. Also the day AddressSanitizer turned out to be broken on this machine, which took the whole afternoon.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<link rel="stylesheet" href="../assets/journal.css">
+</head>
+<body>
+
+<p class="kicker"><a href="./">Journal</a> &middot; Monday 17 August 2026 &middot; Weeks 1&ndash;2 &middot; Project 1</p>
+<h1>Four programs behind one command</h1>
+<div class="entry">
+<h2>Built</h2>
+<p>First working session of the tutorial. Nothing to build yet, so the work was getting the
+machine into a state where building is trustworthy.</p>
+
+<h2>Worked through</h2>
+<ul>
+  <li><a href="../lessons/0001-four-programs-not-one.html">Lesson 1 &mdash; Four Programs, Not
+  One</a>. The thing I did not know: <code>clang++ main.cpp</code> is not one program. It is a
+  preprocessor, a compiler, an assembler, and a linker run in sequence, and almost every error
+  message I will get for the next four months is really telling me <em>which of the four</em>
+  stopped.</li>
+  <li>Started <a href="../reference/glossary.html">the glossary</a>, which I add to as terms
+  actually come up rather than filling in ahead of time.</li>
+</ul>
+
+<h2>What broke</h2>
+<p>The whole afternoon, in the end. I built a program with
+<code>-fsanitize=address</code> and it compiled, linked, and then <strong>hung on startup with no
+output at all</strong>. No crash, no error, nothing to search for.</p>
+<p>We sampled the stuck process instead of guessing, and the stack showed AddressSanitizer
+deadlocking inside its own initialisation: its shadow-memory setup calls into macOS 26's dyld,
+which calls <code>malloc</code>, which ASan has already intercepted, which re-enters ASan's
+initialiser, which spins forever on a lock it is already holding. Apple's clang, not my code.</p>
+
+<h2>What I took away</h2>
+<ul>
+  <li>Everyday builds and UBSan: Apple clang. AddressSanitizer: Homebrew clang only. This is now a
+  fixed rule on this machine and it is written down in
+  <a href="../reference/toolchain.html">the toolchain sheet</a>.</li>
+  <li>A hang is evidence, not a dead end. Sampling the process answered in one step what an hour of
+  re-reading my own code would not have.</li>
+  <li>Written up in full, with the stack, as
+  <a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0001-asan-broken-under-apple-clang.md">learning
+  record 0001</a>.</li>
+</ul>
+</div>
+</body>
+</html>

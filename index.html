@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>C++ Tutorial &mdash; José Araya, Fall 2026</title>
+<link rel="stylesheet" href="./assets/lesson.css">
+<style>
+  body { max-width: 44rem; padding-top: 2.5rem; }
+  h2 { margin-top: 2.4rem; }
+  ul.index { list-style: none; padding: 0; margin: 0.8rem 0 0; }
+  ul.index li { border-top: 1px solid var(--rule); padding: 0.55rem 0; }
+  ul.index li:last-child { border-bottom: 1px solid var(--rule); }
+  ul.index a { font-weight: 600; text-decoration: none; }
+  ul.index a:hover { text-decoration: underline; }
+  ul.index .note { display: block; color: var(--ink-soft); font-size: 0.85rem;
+                   margin-top: 0.15rem; }
+  .meta { font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.1em;
+          text-transform: uppercase; color: var(--ink-faint); }
+</style>
+</head>
+<body>
+
+<p class="kicker">C++ Tutorial &middot; Fall 2026 &middot; Prof. Roy</p>
+<h1>José Araya &mdash; Tutorial Workspace</h1>
+<p class="standfirst">Everything I do for this tutorial, in one place: the lessons I work
+through, the reference sheets I keep next to me while coding, the things I got wrong and
+wrote down, the videos I watch, and the code itself. The journal is the running record;
+the rest is what the journal points at.</p>
+
+<p>The tutorial is built around three from-scratch projects &mdash; a container library, a
+ray tracer, and a chess engine. The plan and the grading checkpoints are in
+<a href="./MISSION.md">MISSION.md</a>; the vetted reading and viewing list is in
+<a href="./RESOURCES.md">RESOURCES.md</a>.</p>
+
+<h2>Journal</h2>
+<p>Dated entries, one per working session: what I built, what I read or watched, what broke,
+and what I learned from it.</p>
+<p><strong><a href="./journal/">Read the journal &rarr;</a></strong></p>
+
+<h2>Lessons</h2>
+<p>Written for this tutorial and worked through in order. Each one ends in code I actually
+compiled and ran on my machine; the commands and their output are real, not illustrative.</p>
+<ul class="index">
+<!-- BEGIN:lessons -->
+  <li><a href="./lessons/0001-four-programs-not-one.html">Lesson 1 — Four Programs, Not One</a>
+    <span class="note">The four separate programs hiding behind one clang++ command: preprocessor, compiler, assembler, linker.</span></li>
+  <li><a href="./lessons/0002-two-builds-one-source-tree.html">Lesson 2 — Two Builds, One Source Tree</a>
+    <span class="note">Why one source tree needs both a debug and a release build, and how to keep the two from fighting.</span></li>
+  <li><a href="./lessons/0003-the-linker-only-sees-what-you-listed.html">Lesson 3 — The Linker Only Sees What You Listed</a>
+    <span class="note">Undefined symbol errors, and why dropping a .cpp into src/ does not put it in the build.</span></li>
+  <li><a href="./lessons/0004-why-cmake-exists.html">Lesson 4 — CMake Is Not a Build System</a>
+    <span class="note">CMake is a generator, not a build system. What it actually buys you is the dependency graph.</span></li>
+  <li><a href="./lessons/0005-the-heap-and-your-first-vector.html">Lesson 5 — The Heap, and Your First Vector</a>
+    <span class="note">Stack versus heap, and a forty-line Vector that grows &mdash; containing a deliberate leak to find with a tool.</span></li>
+  <li><a href="./lessons/recall-01-weeks-1-2.html">Recall — Weeks 1&ndash;2</a>
+    <span class="note">Interactive recall over weeks 1&ndash;2: the build pipeline, CMake, the heap, and the first Vector.</span></li>
+<!-- END:lessons -->
+</ul>
+
+<h2>Reference sheets</h2>
+<p>The parts I need at hand rather than in my head. Written to print well and sit next to
+the keyboard.</p>
+<ul class="index">
+<!-- BEGIN:reference -->
+  <li><a href="./reference/cmake.html">Reference — CMake &amp; Sanitizer Builds</a>
+    <span class="note">The CMake and sanitizer command lines for this machine, verified and ready to copy.</span></li>
+  <li><a href="./reference/glossary.html">Glossary — C++ Tutorial</a>
+    <span class="note">Plain definitions of the terms as they come up: translation unit, stack, heap, pointer, capacity.</span></li>
+  <li><a href="./reference/new-project.html">Reference — Starting a New C++ Project</a>
+    <span class="note">Runbook for starting a scratch project with newcpp, plus a Visual Studio to macOS translation table.</span></li>
+  <li><a href="./reference/toolchain.html">Reference — Build Pipeline &amp; Error Triage</a>
+    <span class="note">The build pipeline on this Mac, and how to triage an error back to the stage that produced it.</span></li>
+  <li><a href="./reference/vector-internals.html">Reference — How a Vector Works Inside</a>
+    <span class="note">How a vector works inside: size versus capacity, growth, reallocation, and iterator invalidation.</span></li>
+<!-- END:reference -->
+</ul>
+
+<h2>Learning records</h2>
+<p>One file per thing that cost me real time to figure out, with the evidence that settled
+it. These are the ones where the answer was not in any tutorial.</p>
+<ul class="index">
+<!-- BEGIN:records -->
+  <li><a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0001-asan-broken-under-apple-clang.md">Apple clang's AddressSanitizer is unusable on this machine</a></li>
+  <li><a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0002-p1-build-shape-header-only-two-presets.md">Project 1's build is a header-only INTERFACE library with two presets</a></li>
+  <li><a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0003-source-list-is-explicit-not-directory-scan.md">A <code>.cpp</code> in <code>src/</code> is not in the build until <code>add_executable</code> names it</a></li>
+  <li><a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0004-cmake-is-a-generator-not-a-compiler.md">CMake earns its place through the dependency graph, not through convenience</a></li>
+  <li><a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0005-asan-does-not-detect-leaks-on-macos.md">AddressSanitizer reports no leaks on macOS; <code>leaks</code> fills the gap</a></li>
+  <li><a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0006-ubsan-instrumentation-hides-leaks-from-leaks.md"><code>-fsanitize=undefined</code> makes Apple's <code>leaks</code> report zero leaks</a></li>
+<!-- END:records -->
+</ul>
+
+<h2>Videos</h2>
+<p>Video is for intuition, <a href="https://www.learncpp.com/">learncpp</a> is for style
+&mdash; where they disagree, learncpp wins. The log records what I have watched and what
+each one actually explained.</p>
+<p><strong><a href="./videos.html">Video log &rarr;</a></strong></p>
+
+<h2>Code</h2>
+<ul class="index">
+  <li><a href="https://github.com/jaas29/p1-containers">p1-containers</a>
+    <span class="note">Project 1, the graded deliverable: <code>vector</code> and
+    <code>unordered_map</code> written from scratch, header-only, two CMake presets, warnings
+    as errors, clean under AddressSanitizer and UBSan.</span></li>
+  <li><a href="https://github.com/jaas29/mystl">mystl</a>
+    <span class="note">Scratch. Where I follow along with video tutorials outside the lesson
+    track and break things on purpose. Not submitted, not graded.</span></li>
+</ul>
+
+<footer>
+  <p class="meta">Source repository: <a
+  href="https://github.com/jaas29/cpp-tutorial-journal">github.com/jaas29/cpp-tutorial-journal</a></p>
+</footer>
+
+</body>
+</html>

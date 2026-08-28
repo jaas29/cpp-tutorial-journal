@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 4 — CMake Is Not a Build System</title>
+<meta name="description" content="CMake is a generator, not a build system. What it actually buys you is the dependency graph.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<link rel="stylesheet" href="../assets/quiz.css">
+</head>
+<body>
+
+<p class="kicker">Lesson 04 &middot; Project 1, block 1 &middot; asked, not scheduled</p>
+<h1>CMake Is Not a Build System</h1>
+<p class="standfirst">You can build Project 1 by hand. Four <code>clang++</code> commands, no
+<code>CMakeLists.txt</code>, done. So the honest question is not &ldquo;how do I use CMake&rdquo; but
+&ldquo;what breaks when I don&rsquo;t.&rdquo; Three things break. This lesson breaks them on purpose,
+then shows what CMake actually is &mdash; which is not what most people assume.</p>
+
+<h2><span class="num">Set-up</span>The program we are building by hand</h2>
+
+<p>Three sources and one header &mdash; the same shape <code>mystl</code> already has:</p>
+
+<pre><code>include/log.hpp     declares  void Log(const char*);
+src/log.cpp         defines   Log
+src/vecutil.cpp     defines   Report, calls Log
+src/main.cpp        calls     Log and Report</code></pre>
+
+<p>From <a href="./0001-four-programs-not-one.html">Lesson 1</a>: the compiler handles exactly one
+translation unit at a time. So building this by hand is three compiles and one link, and there is
+nothing clever about it.</p>
+
+<pre><code>clang++ -std=c++20 -Wall -Wextra -Wpedantic -Werror -g -Iinclude -c src/main.cpp    -o obj/main.o
+clang++ -std=c++20 -Wall -Wextra -Wpedantic -Werror -g -Iinclude -c src/log.cpp     -o obj/log.o
+clang++ -std=c++20 -Wall -Wextra -Wpedantic -Werror -g -Iinclude -c src/vecutil.cpp -o obj/vecutil.o
+clang++ -g obj/main.o obj/log.o obj/vecutil.o -o app</code></pre>
+
+<pre><code>$ ./app
+hello
+vecutil reporting</code></pre>
+
+<p>That works. Every command above was run on your machine to produce that output. Keep it in mind
+as the baseline: <strong>CMake does not do anything you could not type yourself.</strong> It types
+these for you, and it decides <em>which</em> of them to type.</p>
+
+<h2><span class="num">Break 1</span>The flag list has to be identical everywhere</h2>
+
+<p>Look at what repeats: <code>-std=c++20 -Wall -Wextra -Wpedantic -Werror -g -Iinclude</code>,
+three times, character for character. Nothing enforces that. Drop <code>-Iinclude</code> from one
+line and that file alone fails to find the header. Drop <code>-Werror</code> from one line and that
+file alone silently accepts a warning &mdash; and it will be the file you did not check.</p>
+
+<p>Worse is the case where the flags <em>disagree in a way that still compiles</em>. Two files built
+with different values of a macro, or against different standard versions, link happily and then
+misbehave at runtime. This is the same failure family as the signature mismatch in
+<a href="./0003-the-linker-only-sees-what-you-listed.html">Lesson 3</a>: the toolchain will not stop
+you, because from its point of view you meant it.</p>
+
+<p>CMake&rsquo;s answer is that flags belong to a <em>target</em>, not to a command line. You say it
+once:</p>
+
+<p class="filename">CMakeLists.txt</p>
+<pre><code>add_executable(app src/main.cpp src/log.cpp src/vecutil.cpp)
+target_include_directories(app PRIVATE include)
+target_compile_options(app PRIVATE -Wall -Wextra -Wpedantic -Werror -g)</code></pre>
+
+<p>Every source in that target now gets exactly the same treatment, by construction. The
+<code>PRIVATE</code>/<code>PUBLIC</code>/<code>INTERFACE</code> keywords are how that inheritance is
+controlled &mdash; the table in <a href="../reference/cmake.html">the CMake reference sheet</a> is
+the one to keep open.</p>
+
+<h2><span class="num">Break 2</span>You do not know what needs rebuilding</h2>
+
+<p>This is the real one, and it is the reason build systems exist at all.</p>
+
+<p>You edited one file. Which of those four commands do you need to re-run? Re-running all of them
+is always correct and always wasteful &mdash; and P1&rsquo;s templates plus P2&rsquo;s ray tracer
+will make &ldquo;wasteful&rdquo; mean minutes, every save. Re-running only the obvious one is fast
+and sometimes <em>wrong</em>: if you changed <code>log.hpp</code>, then <code>main.cpp</code> and
+<code>vecutil.cpp</code> both need recompiling too, because both included it. You linked stale
+object files and you will not be told.</p>
+
+<p>Getting this right means knowing which <code>.cpp</code> pulls in which header &mdash;
+transitively, through headers that include headers. A shell script cannot know that. CMake asks the
+compiler, records the answer, and uses it. Here is that happening, real output from your machine:</p>
+
+<pre><code>$ printf '\n// tweak\n' &gt;&gt; src/vecutil.cpp
+$ cmake --build build
+[ 25%] Building CXX object CMakeFiles/app.dir/src/vecutil.cpp.o
+[ 50%] Linking CXX executable app
+[100%] Built target app</code></pre>
+
+<p>One file changed, one file recompiled. Now the header:</p>
+
+<pre><code>$ printf '\n' &gt;&gt; include/log.hpp
+$ cmake --build build
+[ 25%] Building CXX object CMakeFiles/app.dir/src/main.cpp.o
+[ 50%] Building CXX object CMakeFiles/app.dir/src/log.cpp.o
+[ 75%] Building CXX object CMakeFiles/app.dir/src/vecutil.cpp.o
+[100%] Linking CXX executable app
+[100%] Built target app</code></pre>
+
+<p>All three, because all three include it. Nobody told CMake that. It is written down in a file it
+generated, which you can read:</p>
+
+<p class="filename">build/CMakeFiles/app.dir/compiler_depend.make</p>
+<pre><code>CMakeFiles/app.dir/src/vecutil.cpp.o: .../src/vecutil.cpp \
+  .../include/log.hpp</code></pre>
+
+<p>Read that as a sentence: <em>this object file is out of date if either of these two files is
+newer than it.</em> That is the whole idea. A build system is a dependency graph plus the rule
+&ldquo;rebuild anything older than what it depends on.&rdquo;</p>
+
+<div class="aside">
+  <span class="label">Why this bites you specifically</span>
+  P1 is header-only. Your <code>vector.hpp</code> <em>is</em> the code, so every test file depends
+  on it and every edit rebuilds all of them. Header dependency tracking is not a detail in this
+  project &mdash; it is the main event.
+</div>
+
+<h2><span class="num">Break 3</span>You need two builds, not one</h2>
+
+<p>From <a href="./0002-two-builds-one-source-tree.html">Lesson 2</a>: your <code>asan</code> build
+uses a different compiler, extra sanitizer flags, and an <code>-isysroot</code>. By hand, that is a
+second complete set of the four commands, kept in sync with the first forever, writing to different
+object files so the two toolchains&rsquo; output never mixes. Two build directories and one source
+tree is a thing CMake is built to do and a thing hand-typing is bad at.</p>
+
+<h2><span class="num">Knowledge</span>So what <em>is</em> CMake</h2>
+
+<p>Here is the part that is usually skipped, and it explains the two-command workflow that otherwise
+looks arbitrary.</p>
+
+<p><strong>CMake does not build your program. CMake writes a program that builds your
+program.</strong> It is a build system <em>generator</em>. On this machine it reads your
+<code>CMakeLists.txt</code> and writes Makefiles into <code>build/</code>; <code>make</code> then
+runs those. That is why there are two steps and why they have different triggers.</p>
+
+<figure>
+<svg viewBox="0 0 640 200" role="img" aria-label="CMakeLists.txt is read by cmake at configure time, which generates makefiles into build slash, which cmake --build then runs to invoke clang++.">
+  <rect class="svg-box" x="8" y="60" width="120" height="46" rx="3"/>
+  <text class="svg-mono svg-ink" x="68" y="82" font-size="11" text-anchor="middle">CMakeLists.txt</text>
+  <text class="svg-mono svg-faint" x="68" y="96" font-size="9" text-anchor="middle">you write this</text>
+
+  <path class="svg-stroke" d="M132 83 H196" stroke-width="1"/>
+  <path class="svg-stroke" d="M188 78 l8 5 -8 5" stroke-width="1"/>
+  <text class="svg-mono svg-accent" x="164" y="74" font-size="8.5" text-anchor="middle">configure</text>
+
+  <rect class="svg-box" x="200" y="60" width="120" height="46" rx="3"/>
+  <text class="svg-mono svg-ink" x="260" y="82" font-size="11" text-anchor="middle">build/</text>
+  <text class="svg-mono svg-faint" x="260" y="96" font-size="9" text-anchor="middle">34 generated files</text>
+
+  <path class="svg-stroke" d="M324 83 H388" stroke-width="1"/>
+  <path class="svg-stroke" d="M380 78 l8 5 -8 5" stroke-width="1"/>
+  <text class="svg-mono svg-accent" x="356" y="74" font-size="8.5" text-anchor="middle">build</text>
+
+  <rect class="svg-box" x="392" y="60" width="120" height="46" rx="3"/>
+  <text class="svg-mono svg-ink" x="452" y="82" font-size="11" text-anchor="middle">make</text>
+  <text class="svg-mono svg-faint" x="452" y="96" font-size="9" text-anchor="middle">runs clang++</text>
+
+  <path class="svg-stroke" d="M516 83 H580" stroke-width="1"/>
+  <path class="svg-stroke" d="M572 78 l8 5 -8 5" stroke-width="1"/>
+  <rect class="svg-box" x="584" y="60" width="48" height="46" rx="3"/>
+  <text class="svg-mono svg-ink" x="608" y="87" font-size="11" text-anchor="middle">app</text>
+
+  <text class="svg-mono svg-soft" x="68" y="140" font-size="9" text-anchor="middle">cmake -B build</text>
+  <text class="svg-mono svg-soft" x="260" y="140" font-size="9" text-anchor="middle">↑ run once, and after</text>
+  <text class="svg-mono svg-soft" x="260" y="152" font-size="9" text-anchor="middle">every CMakeLists edit</text>
+  <text class="svg-mono svg-soft" x="452" y="140" font-size="9" text-anchor="middle">cmake --build build</text>
+  <text class="svg-mono svg-soft" x="452" y="152" font-size="9" text-anchor="middle">↑ run after every save</text>
+</svg>
+<figcaption>Two commands, two jobs. Configure translates your intent into a build system; build
+runs it. <code>cmake --build build</code> is a portable wrapper &mdash; it just calls
+<code>make</code> for you, so you do not have to care which generator was used.</figcaption>
+</figure>
+
+<p>You can read what it generated. This file is CMake&rsquo;s translation of your three lines of
+flags into the literal command line it will use:</p>
+
+<p class="filename">build/CMakeFiles/app.dir/flags.make</p>
+<pre><code>CXX_INCLUDES = -I/.../whycmake/include
+CXX_FLAGS = -std=gnu++20 -arch arm64 -Wall -Wextra -Wpedantic -Werror -g</code></pre>
+
+<p>Compare that to the hand-typed command at the top of this lesson. Same flags, one source of
+truth. Note <code>-std=gnu++20</code>, not <code>-std=c++20</code> &mdash; CMake enables GNU
+extensions by default. That is precisely why your <code>mystl/CMakeLists.txt</code> carries
+<code>set(CMAKE_CXX_EXTENSIONS OFF)</code>: it turns that into plain <code>-std=c++20</code>, so the
+compiler rejects non-standard code instead of quietly accepting it.</p>
+
+<div class="aside">
+  <span class="label">The one-sentence version</span>
+  CMake exists so that &ldquo;what my program is made of&rdquo; is written down once, in a file, in
+  a form that is portable across compilers and operating systems &mdash; instead of living in your
+  shell history.
+</div>
+
+<h2><span class="num">Skill</span>Retrieval</h2>
+
+<div class="quiz" data-quiz data-title="Check yourself">
+  <ol class="quiz-items">
+    <li class="quiz-q" data-answer="3" data-explain="CMake reads CMakeLists.txt and writes build files; make (or ninja) is what actually launches clang++. This is why the workflow has two commands rather than one.">
+      <p class="quiz-prompt">What runs the <code>clang++</code> commands that produce your object files?</p>
+      <ul class="quiz-options">
+        <li>CMake, during the configure step</li>
+        <li>CMake, during the compile step</li>
+        <li>Make, using files CMake wrote</li>
+        <li>Make, using files you wrote</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="4" data-explain="Every translation unit that included the header must be recompiled, because the header's text is pasted into each of them. CMake knows the list because it recorded the compiler's own report of what each file included.">
+      <p class="quiz-prompt">You edit <code>log.hpp</code>, included by all three sources. What gets recompiled?</p>
+      <ul class="quiz-options">
+        <li>The header only, then relink</li>
+        <li>Nothing; headers are not compiled</li>
+        <li>Only the source you last edited</li>
+        <li>All three sources, then relink</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="2" data-explain="Editing CMakeLists.txt changes the build system itself, so it must be regenerated. Editing a .cpp changes only an input to the existing build system. The reference sheet's table has the full list.">
+      <p class="quiz-prompt">Which change requires re-running the configure step?</p>
+      <ul class="quiz-options">
+        <li>Editing the body of a function</li>
+        <li>Adding a file to a target</li>
+        <li>Renaming a local variable</li>
+        <li>Fixing a compiler warning</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="1" data-explain="A shell script has no dependency graph. It cannot tell which sources included a changed header, so it must rebuild everything or risk linking stale objects. Repetition and configurations are annoyances; this one is a correctness problem.">
+      <p class="quiz-prompt">A shell script of four <code>clang++</code> lines fails hardest at which job?</p>
+      <ul class="quiz-options">
+        <li>Rebuilding only the stale files</li>
+        <li>Applying the same flags twice</li>
+        <li>Finding headers in <code>include/</code></li>
+        <li>Passing sanitizer flags to clang</li>
+      </ul>
+    </li>
+  </ol>
+</div>
+
+<div class="recall" data-recall>
+  <p class="recall-front">Out loud, in one sentence: what is the difference between
+  <code>cmake -B build</code> and <code>cmake --build build</code>?</p>
+  <p class="recall-back">The first reads <code>CMakeLists.txt</code> and generates a build system
+  into <code>build/</code>. The second runs that build system. Configure after editing
+  <code>CMakeLists.txt</code>; build after editing source.</p>
+</div>
+
+<h2><span class="num">Do this now</span>Ten minutes in your own repo</h2>
+
+<ol class="steps">
+  <li>In <code>~/projects/cpp-tutorial/mystl</code>, run <code>cmake --build build</code> twice in a
+  row. The second prints <code>Built target mystl</code> and nothing else &mdash; that is the
+  dependency graph telling you there is no work to do.</li>
+  <li>Open <code>build/CMakeFiles/mystl.dir/flags.make</code> and find your own
+  <code>-Wall -Wextra -Wpedantic</code> in it. Confirm the <code>-std=</code> says
+  <code>c++20</code>, not <code>gnu++20</code> &mdash; that is your
+  <code>CMAKE_CXX_EXTENSIONS OFF</code> doing its job.</li>
+  <li>Touch a header in <code>include/</code>, rebuild, and watch which files recompile. Predict the
+  list before you press enter.</li>
+  <li>Run <code>cmake --build build -v</code> once. It prints the full <code>clang++</code> command
+  lines. They should look like the hand-typed ones at the top of this lesson.</li>
+</ol>
+
+<div class="source">
+  <span class="label">Primary source</span>
+  <p><a href="https://cmake.org/cmake/help/latest/guide/tutorial/A-Basic-Starting-Point.html">CMake
+  Tutorial, Step 1: A Basic Starting Point</a> &mdash; written by the CMake maintainers, and the
+  only CMake source guaranteed current with the 4.4.2 you have installed. Twenty minutes. Stop at
+  the end of Step 3; everything after that is packaging and you do not need it this term.</p>
+  <p>If you want the &ldquo;why&rdquo; from the other direction, the classic is
+  <a href="https://www.cs.tufts.edu/~nr/cs257/archive/peter-miller/recursive-make-considered-harmful.pdf">Miller,
+  <em>Recursive Make Considered Harmful</em></a> (1998) &mdash; it is really an argument that the
+  build is one dependency graph, which is the idea underneath Break 2. Optional.</p>
+</div>
+
+<footer>
+  <h2>Where this sits</h2>
+  <p>Before: <a href="./0001-four-programs-not-one.html">Lesson 1 &mdash; Four Programs, Not
+  One</a>, <a href="./0002-two-builds-one-source-tree.html">Lesson 2 &mdash; Two Builds, One Source
+  Tree</a>, <a href="./0003-the-linker-only-sees-what-you-listed.html">Lesson 3 &mdash; The Linker
+  Only Sees What You Listed</a>.</p>
+  <p>Reference: <a href="../reference/cmake.html">CMake &amp; Sanitizer Builds</a> &mdash; the daily
+  commands and the configure-or-build table. <a href="../reference/glossary.html">Glossary</a> for
+  <em>target</em>, <em>translation unit</em>, <em>generator</em>.</p>
+  <p>Next: headers properly &mdash; moving <code>main.cpp</code>&rsquo;s hand-written declaration of
+  <code>Log</code> into <code>include/mystl/Log.hpp</code>, <code>#pragma once</code>, and the
+  one-definition rule. That is the file shape <code>vector.hpp</code> needs.</p>
+  <p class="ask">Anything above that is still fuzzy, ask me. Good questions for this one: why the
+  build directory is disposable, what happens if two build directories point at different compilers,
+  or what <code>PRIVATE</code> actually means.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

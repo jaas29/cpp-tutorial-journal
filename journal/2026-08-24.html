@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>24 Aug 2026 &mdash; An undefined symbol that never named the guilty file</title>
+<meta name="description" content="Lesson 3, and a real link failure in the scratch repo where the error message pointed at the one file that was correct.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<link rel="stylesheet" href="../assets/journal.css">
+</head>
+<body>
+
+<p class="kicker"><a href="./">Journal</a> &middot; Monday 24 August 2026 &middot; Weeks 1&ndash;2 &middot; Scratch + Project 1</p>
+<h1>An undefined symbol that never named the guilty file</h1>
+<div class="entry">
+<h2>Built</h2>
+<p>Started <a href="https://github.com/jaas29/mystl">mystl</a>, the scratch repo where I follow
+along with The Cherno's videos outside the lesson track. Nothing here is graded; the point is to
+break things on purpose and see what the errors look like.</p>
+
+<h2>What broke</h2>
+<p>I split a <code>Log</code> function out of <code>main.cpp</code> into its own
+<code>src/Log.cpp</code>, which is the obvious tidy-up, and the build failed at link time:</p>
+<pre><code>Undefined symbols for architecture arm64:
+  "Log(char const*)", referenced from:
+      ltmp1 in main.cpp.o</code></pre>
+<p>What made this hard is that <strong>the error names <code>main.cpp.o</code>, the file that is
+correct</strong>, and never mentions <code>Log.cpp</code> at all. I spent a while staring at
+<code>main.cpp</code> looking for a typo that was not there.</p>
+
+<h2>What I took away</h2>
+<p>Putting a <code>.cpp</code> in <code>src/</code> does not put it in the build. Nothing in the
+toolchain scans directories. <code>add_executable</code> is the <em>only</em> statement of which
+translation units exist, and <code>Log.cpp</code> was not in it &mdash; so it was never compiled,
+produced no object file, and supplied no symbol. Meanwhile <code>main.cpp</code> compiled perfectly
+happily, because my hand-written declaration <code>void Log(const char*);</code> was all the
+compiler ever needed to see. The compiler trusts the declaration; only the linker checks whether
+anyone actually wrote the thing.</p>
+<p>We diagnosed it by reading the symbol tables rather than guessing, which is the part I want to
+remember. Written up as
+<a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0003-source-list-is-explicit-not-directory-scan.md">learning
+record 0003</a>.</p>
+
+<h2>Worked through</h2>
+<p><a href="../lessons/0003-the-linker-only-sees-what-you-listed.html">Lesson 3 &mdash; The Linker
+Only Sees What You Listed</a>, written around this exact failure while it was still fresh.</p>
+</div>
+</body>
+</html>

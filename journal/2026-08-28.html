@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>28 Aug 2026 &mdash; Putting all of this somewhere you can read it</title>
+<meta name="description" content="Set up this journal and published the workspace, after the first meeting. Five days to the Sep 2 checkpoint.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<link rel="stylesheet" href="../assets/journal.css">
+</head>
+<body>
+
+<p class="kicker"><a href="./">Journal</a> &middot; Friday 28 August 2026 &middot; Weeks 1&ndash;2 &middot; Housekeeping</p>
+<h1>Putting all of this somewhere you can read it</h1>
+<div class="entry">
+<h2>Built</h2>
+<p>This site, after our first meeting. Everything I had been keeping locally &mdash; the lessons,
+the reference sheets, the learning records &mdash; is now a public repository published as a web
+page, so there is one link rather than a folder of files you cannot open.</p>
+<ul>
+  <li>Went with GitHub over Google Drive for one concrete reason: the lessons are real web pages
+  with a stylesheet and interactive quizzes, and Drive shows an uploaded <code>.html</code> as raw
+  source or a download prompt. On GitHub Pages they render the way they were written.</li>
+  <li>Backfilled the journal from 17 August onward, reconstructed from the files, the commit
+  history, and the learning records. Entries from today on are written the same day.</li>
+  <li>Added a <a href="../videos.html">video log</a>, since a lot of what I do outside the lessons
+  is watching rather than reading, and that was previously invisible.</li>
+  <li>Wrote <code>bin/build-index.sh</code> so the index pages regenerate from the files
+  themselves. An index maintained by hand goes stale, and a stale index is how a journal quietly
+  stops being true.</li>
+</ul>
+
+<h2>Next</h2>
+<p><strong>The Sep 2 checkpoint is five days out.</strong> The two lessons that matter between now
+and then are destructors and RAII &mdash; the fix for the leak I put in Lesson 5 on purpose &mdash;
+and then the copy constructor and the double free you get without one. Those two are the heart of
+the deliverable.</p>
+</div>
+</body>
+</html>

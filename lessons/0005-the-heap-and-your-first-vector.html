@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 5 — The Heap, and Your First Vector</title>
+<meta name="description" content="Stack versus heap, and a forty-line Vector that grows &mdash; containing a deliberate leak to find with a tool.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<link rel="stylesheet" href="../assets/quiz.css">
+</head>
+<body>
+
+<p class="kicker">Lesson 05 &middot; Weeks 1&ndash;2 &middot; 8 days to the Sep 2 checkpoint</p>
+<h1>The Heap, and Your First Vector</h1>
+<p class="standfirst">Three lessons on the build system is enough. This one ends with a
+<code>Vector</code> that grows &mdash; about forty lines, and the first code in this project that is
+actually Project 1. It will also contain a memory leak, on purpose, which you will then find with a
+tool rather than by staring.</p>
+
+<h2><span class="num">Knowledge 1</span>Two places a variable can live</h2>
+
+<p>Every value in a C++ program lives in one of two places, and the difference is the whole reason
+<code>vector</code> has to exist.</p>
+
+<p><strong>The stack</strong> is where local variables go. When you write <code>int x = 5;</code>
+inside a function, the compiler already knows, at compile time, how many bytes that needs and
+exactly where to put them. Entering a function moves a pointer down; leaving it moves the pointer
+back up, and everything that was there is gone. That is why it is fast, and it is why the size has
+to be known in advance.</p>
+
+<p><strong>The heap</strong> is a large pool you request memory from at runtime, in whatever size you
+compute while running. Nothing releases it automatically. It stays yours until you say otherwise.</p>
+
+<figure>
+<svg viewBox="0 0 620 240" role="img" aria-label="Stack frame for main holds a Vector object with three small members; one of those members is a pointer whose value is an address in the heap, where the actual array of ints lives.">
+  <text class="svg-mono svg-faint" x="14" y="20" font-size="9">STACK &mdash; automatic, freed on scope exit</text>
+  <rect class="svg-box" x="14" y="30" width="230" height="120" rx="3"/>
+  <text class="svg-mono svg-soft" x="26" y="48" font-size="9">main()</text>
+
+  <rect class="svg-box" x="28" y="56" width="200" height="26" rx="2"/>
+  <text class="svg-mono svg-ink" x="38" y="73" font-size="10">m_data  ──────────────┐</text>
+  <rect class="svg-box" x="28" y="86" width="200" height="26" rx="2"/>
+  <text class="svg-mono svg-ink" x="38" y="103" font-size="10">m_size  = 5</text>
+  <rect class="svg-box" x="28" y="116" width="200" height="26" rx="2"/>
+  <text class="svg-mono svg-ink" x="38" y="133" font-size="10">m_cap   = 8</text>
+
+  <text class="svg-mono svg-faint" x="26" y="168" font-size="9">the Vector object itself:</text>
+  <text class="svg-mono svg-faint" x="26" y="181" font-size="9">24 bytes, size known at compile time</text>
+
+  <path class="svg-stroke" d="M244 70 H330" stroke-width="1"/>
+  <path class="svg-stroke" d="M322 65 l8 5 -8 5" stroke-width="1"/>
+  <text class="svg-mono svg-accent" x="287" y="62" font-size="8.5" text-anchor="middle">points to</text>
+
+  <text class="svg-mono svg-faint" x="336" y="20" font-size="9">HEAP &mdash; yours until you delete it</text>
+  <rect class="svg-box" x="336" y="30" width="270" height="120" rx="3"/>
+  <g font-size="9" class="svg-mono svg-ink">
+    <rect class="svg-box" x="346" y="56" width="32" height="26" rx="2"/><text x="362" y="73" text-anchor="middle">0</text>
+    <rect class="svg-box" x="378" y="56" width="32" height="26" rx="2"/><text x="394" y="73" text-anchor="middle">10</text>
+    <rect class="svg-box" x="410" y="56" width="32" height="26" rx="2"/><text x="426" y="73" text-anchor="middle">20</text>
+    <rect class="svg-box" x="442" y="56" width="32" height="26" rx="2"/><text x="458" y="73" text-anchor="middle">30</text>
+    <rect class="svg-box" x="474" y="56" width="32" height="26" rx="2"/><text x="490" y="73" text-anchor="middle">40</text>
+    <rect class="svg-box" x="506" y="56" width="32" height="26" rx="2" opacity="0.45"/>
+    <rect class="svg-box" x="538" y="56" width="32" height="26" rx="2" opacity="0.45"/>
+    <rect class="svg-box" x="570" y="56" width="26" height="26" rx="2" opacity="0.45"/>
+  </g>
+  <text class="svg-mono svg-faint" x="346" y="103" font-size="9">5 values used, 8 slots allocated</text>
+  <text class="svg-mono svg-faint" x="346" y="120" font-size="9">size chosen at RUNTIME by push_back</text>
+  <text class="svg-mono svg-faint" x="346" y="137" font-size="9">nothing frees this for you</text>
+</svg>
+<figcaption>A <code>Vector</code> is a small, fixed-size object on the stack that owns a large,
+variable-size buffer on the heap. Every container you write this term has this shape.</figcaption>
+</figure>
+
+<h2><span class="num">Knowledge 2</span>The Java shift</h2>
+
+<p>This is flagged in your proposal as the single most important conceptual shift, so it is worth
+being blunt about it.</p>
+
+<p>In Java, <code>Vector v</code> is a <em>reference</em>. The object is always on the heap, the
+variable is a handle pointing at it, and assignment copies the handle. Two variables, one object.
+Garbage collection decides when it dies.</p>
+
+<p>In C++, <code>Vector v</code> <em>is the object</em>. It sits in the stack frame. Assignment
+copies the object. Two variables, two objects. It dies at the closing brace of its scope, at a
+moment you can point to in the source.</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>You write</th><th>Java means</th><th>C++ means</th></tr>
+<tr><td><code>Vector b = a;</code></td><td>b and a name the same object</td><td>b is a second, independent object copied from a</td></tr>
+<tr><td><code>b.push_back(1)</code></td><td>a sees the change</td><td>a does not see the change</td></tr>
+<tr><td>end of scope</td><td>nothing; GC decides later</td><td>the object is destroyed, here, now</td></tr>
+</table>
+</div>
+
+<p>The C++ column is what makes destructors possible, and destructors are what make the whole
+language&rsquo;s resource story work. Hold onto that; it lands properly in the next lesson.</p>
+
+<h2><span class="num">Knowledge 3</span>Asking for heap memory</h2>
+
+<p>Two operators, and they come in matched pairs:</p>
+
+<pre><code>int* p = new int[8];   // allocate 8 ints on the heap; p holds their address
+p[3] = 42;             // use it exactly like an array
+delete[] p;            // give it back
+p = nullptr;           // p no longer points anywhere valid; say so</code></pre>
+
+<ul>
+  <li><code>new int[8]</code> returns a <strong>pointer</strong> &mdash; a variable holding an
+  address. <code>int*</code> is read as &ldquo;pointer to int.&rdquo;</li>
+  <li><code>new[]</code> pairs with <code>delete[]</code>, and plain <code>new</code> pairs with
+  plain <code>delete</code>. Crossing them is undefined behaviour, not a warning.</li>
+  <li>The <code>8</code> does not need to be a constant. That is the entire point &mdash; this is
+  the only way to get a buffer whose size you compute while running.</li>
+</ul>
+
+<div class="aside">
+  <span class="label">Yes, this is the &ldquo;old&rdquo; style</span>
+  Your mission bans raw <code>new</code>/<code>delete</code> as a default, and that stands. But
+  <em>inside a container</em> you are the one implementing the safety that everyone else gets to
+  use. <code>std::vector</code> does exactly this internally. Writing it by hand here is the point;
+  carrying it into Projects 2 and 3 is the mistake.
+</div>
+
+<h2><span class="num">Build</span>Vector, forty lines</h2>
+
+<p>Write this yourself rather than pasting it. This is Project&nbsp;1 work, so it goes in the P1
+repo &mdash; <code>~/projects/p1-containers</code>, not the <code>mystl</code> scratch repo. Put it
+in <code>include/containers/vector.hpp</code>, alongside the existing <code>vec.hpp</code>.</p>
+
+<div class="aside">
+  <span class="label">Leave <code>Buffer</code> alone</span>
+  <code>include/containers/vec.hpp</code> already holds <code>Buffer</code>, a fixed-size type that
+  frees itself in its destructor. Do not extend it and do not delete it. <code>Vector</code> is a
+  separate class in a separate header, and the whole point of this lesson is that it
+  <em>does not</em> have that destructor yet.
+</div>
+
+<p class="filename">include/containers/vector.hpp</p>
+<pre><code>#pragma once
+#include &lt;cstddef&gt;
+
+namespace containers {
+
+class Vector {
+    int* m_data = nullptr;    // the heap buffer, or nullptr if we have none yet
+    std::size_t m_size = 0;   // how many values the user has put in
+    std::size_t m_cap  = 0;   // how many slots we allocated
+
+public:
+    void push_back(int value) {
+        if (m_size == m_cap) grow();
+        m_data[m_size] = value;
+        ++m_size;
+    }
+
+    int&amp; operator[](std::size_t i) { return m_data[i]; }
+
+    std::size_t size()     const { return m_size; }
+    std::size_t capacity() const { return m_cap; }
+
+private:
+    void grow() {
+        std::size_t new_cap = (m_cap == 0) ? 1 : m_cap * 2;
+        int* fresh = new int[new_cap];                 // 1. bigger buffer
+        for (std::size_t i = 0; i &lt; m_size; ++i)       // 2. copy the old values
+            fresh[i] = m_data[i];
+        delete[] m_data;                               // 3. release the old buffer
+        m_data = fresh;                                // 4. adopt the new one
+        m_cap = new_cap;
+    }
+};
+
+} // namespace containers</code></pre>
+
+<p>Four steps in <code>grow</code>, in that order. Getting them out of order &mdash; deleting before
+copying, most commonly &mdash; is the classic version of this bug, and it reads perfectly fine.</p>
+
+<p>Why doubling rather than adding one? Because copying is the expensive part. Doubling means
+<em>n</em> pushes cost <em>n</em> copies in total rather than <em>n</em>&sup2;/2. You will be asked
+this in review; the answer is amortised constant time, and it is a real reason, not a convention.</p>
+
+<p>Drive it from <code>tests/main.cpp</code>:</p>
+
+<pre><code>#include &lt;containers/vector.hpp&gt;
+#include &lt;iostream&gt;
+
+int main() {
+    containers::Vector v;
+    for (int i = 0; i &lt; 5; ++i) {
+        v.push_back(i * 10);
+        std::cout &lt;&lt; "size " &lt;&lt; v.size() &lt;&lt; "  cap " &lt;&lt; v.capacity() &lt;&lt; "\n";
+    }
+    std::cout &lt;&lt; v[3] &lt;&lt; "\n";
+}</code></pre>
+
+<p>Build and run it with the <code>dev</code> preset:</p>
+
+<pre><code>$ cmake --build --preset dev
+$ ./build/dev/tests</code></pre>
+
+<div class="aside">
+  <span class="label"><code>-Werror</code> is on in P1</span>
+  Unlike the scratch repo, <code>CMakeLists.txt</code> here compiles with
+  <code>-Wall -Wextra -Wpedantic -Werror</code>. A signed/unsigned comparison or an unused variable
+  is a build failure, not a yellow squiggle. That is deliberate. Fix the warning; do not silence
+  the flag.
+</div>
+
+<p>That prints:</p>
+
+<pre><code>size 1  cap 1
+size 2  cap 2
+size 3  cap 4
+size 4  cap 4
+size 5  cap 8
+30</code></pre>
+
+<p>Watch the capacity column: it jumps only when it has to, and <code>size 4</code> costs no
+allocation at all. That is the doubling paying off.</p>
+
+<h2><span class="num">The bug</span>You just leaked, and ASan will not tell you</h2>
+
+<p>Nothing in that class ever calls <code>delete[]</code> on the final buffer. When <code>v</code>
+goes out of scope its three members vanish &mdash; including <code>m_data</code>, the only record of
+where the heap buffer was. The buffer is still allocated and now unreachable. That is a leak.</p>
+
+<p>Here is the part worth knowing about your machine specifically: <strong>AddressSanitizer does not
+detect leaks on macOS.</strong> LeakSanitizer is not available on Darwin, so your <code>asan</code>
+build runs this program and reports nothing. Use Apple&rsquo;s <code>leaks</code> tool instead. Wrap
+the vector in a scope so it is destroyed before the program ends, then:</p>
+
+<pre><code>$ MallocStackLogging=1 leaks -atExit -- ./build/dev/tests
+
+Process 44701: 1 leak for 48 total leaked bytes.
+
+STACK OF 1 INSTANCE OF 'ROOT LEAK: &lt;malloc in containers::Vector::grow()&gt;':
+5   tests       main + 72                                   main.cpp:8
+4   tests       containers::Vector::push_back(int) + 56     vector.hpp:13
+3   tests       containers::Vector::grow() + 104            vector.hpp:26
+2   libc++abi   operator new(unsigned long) + 52
+1   libsystem_malloc  _malloc + 96</code></pre>
+
+<p>That is real output from this machine, and it names the line that allocated. Your line numbers
+will differ; the frames will not. 48 bytes: the 8-slot buffer, times four bytes per
+<code>int</code>, plus allocator overhead.</p>
+
+<p>Read the stack from the bottom up and it is the whole call chain: <code>main</code> called
+<code>push_back</code>, which called <code>grow</code>, which called <code>new[]</code>. The leak is
+blamed on <code>grow</code> because that is where the surviving buffer was allocated &mdash; the
+<em>allocation site</em>, not the place you forgot to free. Leak tools always report it this way,
+because the forgetting has no location.</p>
+
+<p>The fix is one function, and it is the subject of the next lesson: a destructor, and the idea
+called RAII that grows out of it.</p>
+
+<h2><span class="num">Skill</span>Retrieval</h2>
+
+<div class="quiz" data-quiz data-title="Check yourself">
+  <ol class="quiz-items">
+    <li class="quiz-q" data-answer="2" data-explain="The Vector object holds three small members and lives in the stack frame. Only the buffer it points at is on the heap. This split is the shape of every container you will write.">
+      <p class="quiz-prompt">In <code>int main() { containers::Vector v; ... }</code>, where does <code>v</code> itself live?</p>
+      <ul class="quiz-options">
+        <li>On the heap, like in Java</li>
+        <li>On the stack, in the frame</li>
+        <li>Half on each, split evenly</li>
+        <li>Nowhere until you push</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="3" data-explain="Copying must happen before the old buffer is released. Deleting first leaves you reading memory you have already given back — a use-after-free that usually appears to work.">
+      <p class="quiz-prompt">Inside <code>grow</code>, which ordering mistake produces a use-after-free?</p>
+      <ul class="quiz-options">
+        <li>Setting capacity before size</li>
+        <li>Allocating before you copy</li>
+        <li>Deleting before you copy</li>
+        <li>Adopting before you delete</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="4" data-explain="Doubling makes the total copying cost across n pushes proportional to n, so each push averages constant time. Growing by one makes every push a full copy.">
+      <p class="quiz-prompt">Doubling capacity instead of adding one slot buys you what?</p>
+      <ul class="quiz-options">
+        <li>Less memory used overall</li>
+        <li>Pointers that stay valid</li>
+        <li>Fewer bytes per element</li>
+        <li>Constant time per push</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="1" data-explain="LeakSanitizer is not supported on macOS, so the asan preset stays silent on leaks. The leaks tool fills that gap. ASan still catches overflows and use-after-free, which is most of what it is for.">
+      <p class="quiz-prompt">Your <code>asan</code> build runs the leaking program. What does it report?</p>
+      <ul class="quiz-options">
+        <li>Nothing; no leak checking</li>
+        <li>A leak, with the alloc site</li>
+        <li>A leak, without any stack</li>
+        <li>A crash at the leaking line</li>
+      </ul>
+    </li>
+  </ol>
+</div>
+
+<div class="recall" data-recall>
+  <p class="recall-front">Out loud: why can a stack variable not hold a buffer whose size you only
+  learn at runtime?</p>
+  <p class="recall-back">Stack layout is decided at compile time — the compiler emits a fixed
+  frame size. A runtime-sized buffer has no compile-time size, so it must come from the heap.</p>
+</div>
+
+<h2><span class="num">Do this now</span>About an hour</h2>
+
+<ol class="steps">
+  <li>Type <code>vector.hpp</code> out by hand into
+  <code>~/projects/p1-containers/include/containers/</code>. Do not paste it. The muscle memory for
+  <code>int*</code>, <code>new[]</code>, and <code>delete[]</code> is worth the ten minutes.</li>
+  <li>Add nothing to <code>CMakeLists.txt</code>. Headers are not listed in
+  <code>add_executable</code> — only <code>.cpp</code> files are, per
+  <a href="./0003-the-linker-only-sees-what-you-listed.html">Lesson 3</a>. The
+  <code>containers</code> INTERFACE target already puts <code>include/</code> on the search path,
+  which is why the angle-bracket include resolves. Rewrite <code>tests/main.cpp</code> and rebuild
+  with <code>cmake --build --preset dev</code>.</li>
+  <li>Confirm the capacity column matches the output above. If it does not, your
+  <code>grow</code> has a different growth rule than you think.</li>
+  <li>Reproduce the leak report with <code>leaks</code>. Getting a tool to tell you about a bug you
+  already know about is how you learn to trust it for the bugs you do not.</li>
+  <li>Now break it deliberately: read <code>v[10]</code> when size is 5, then
+  <code>cmake --build --preset asan &amp;&amp; ./build/asan/tests</code>. Compare that report to the leak report. Two different tools, two
+  different classes of bug.</li>
+</ol>
+
+<div class="source">
+  <span class="label">Primary source</span>
+  <p>learncpp, in this order &mdash; each is short:
+  <a href="https://www.learncpp.com/cpp-tutorial/the-stack-and-the-heap/">The stack and the
+  heap</a>, then
+  <a href="https://www.learncpp.com/cpp-tutorial/dynamic-memory-allocation-with-new-and-delete/">Dynamic
+  memory allocation with new and delete</a>, then
+  <a href="https://www.learncpp.com/cpp-tutorial/dynamically-allocating-arrays/">Dynamically
+  allocating arrays</a>.</p>
+  <p>Video, if you want the visual version first: The Cherno&rsquo;s
+  <a href="https://www.youtube.com/watch?v=DTxHyVn0ODg">POINTERS in C++</a>. Watch it for
+  the mental picture, not the style &mdash; per <code>RESOURCES.md</code>, learncpp wins on style.</p>
+
+  <p class="pairing-intro"><strong>Watching and reading together.</strong> Each row is one idea in
+  this lesson, the Cherno video that draws it, and the learncpp chapter that gets the style right.
+  Watch first for the picture, read second for the rules.</p>
+
+  <div class="table-wrap">
+  <table>
+  <tr><th>This lesson</th><th>Watch (The Cherno)</th><th>Read (learncpp)</th></tr>
+  <tr>
+    <td>Knowledge 1 &mdash; two places a variable can live</td>
+    <td><a href="https://www.youtube.com/watch?v=wJ1L2nSIV1s">Stack vs Heap Memory in C++</a></td>
+    <td><a href="https://www.learncpp.com/cpp-tutorial/the-stack-and-the-heap/">The stack and the heap</a></td>
+  </tr>
+  <tr>
+    <td>Knowledge 3 &mdash; what <code>int*</code> actually holds</td>
+    <td><a href="https://www.youtube.com/watch?v=DTxHyVn0ODg">POINTERS in C++</a></td>
+    <td><a href="https://www.learncpp.com/cpp-tutorial/dynamic-memory-allocation-with-new-and-delete/">Dynamic memory allocation with new and delete</a></td>
+  </tr>
+  <tr>
+    <td>Knowledge 3 &mdash; asking for heap memory</td>
+    <td><a href="https://www.youtube.com/watch?v=NUZdUSqsCs4">The NEW Keyword in C++</a></td>
+    <td><a href="https://www.learncpp.com/cpp-tutorial/dynamically-allocating-arrays/">Dynamically allocating arrays</a></td>
+  </tr>
+  </table>
+  </div>
+
+  <p>Three short videos and three short chapters. That is the whole knowledge base for this lesson
+  &mdash; if you watch and read all six you are over-prepared, and the code below will feel easy.</p>
+
+</div>
+
+<div class="aside">
+    <span class="label">One video to save for later</span>
+    <p>The Cherno also has
+    <a href="https://www.youtube.com/watch?v=ryRf4Jh_YC0">VECTOR/DYNAMIC ARRAY &mdash; Making DATA
+    STRUCTURES in C++</a>, which builds a <code>vector</code> on camera. That is literally Project 1,
+    so it is tempting to jump to it now. <strong>Don&rsquo;t, yet.</strong> It is the destination,
+    not the route: it arrives with templates, move semantics and in-place construction already
+    assumed, and none of those are in this lesson. Watching it today buys confusion, not a head
+    start.</p>
+    <p>Come back to it after the destructor and copy-constructor lessons. At that point it stops
+    being a firehose and turns into the best possible review &mdash; you will recognise every
+    decision he makes, because you will have already made it yourself and gotten it wrong once.
+    I have confirmed the video exists and is his; I could not read its description to check its
+    exact runtime, so give yourself a generous slot when you do get there.</p>
+</div>
+
+<footer>
+  <h2>Where this sits</h2>
+  <p>Before: <a href="./0004-why-cmake-exists.html">Lesson 4 &mdash; CMake Is Not a Build
+  System</a>. The build-system arc is finished; from here it is all C++.</p>
+  <p>Reference: <a href="../reference/glossary.html">Glossary</a> &mdash; stack, heap, pointer,
+  capacity. <a href="../reference/toolchain.html">Toolchain</a> for the sanitizer command lines.</p>
+  <p>Next, and it is urgent with the checkpoint 8 days out: <strong>destructors and RAII</strong>
+  &mdash; the fix for the leak you just made — then the copy constructor and the double-free you
+  get without it. Those two lessons are the heart of the Sep 2 deliverable.</p>
+  <p class="ask">Ask me anything here that did not land. The pointer syntax and the
+  <code>int&amp;</code> return type of <code>operator[]</code> are the two that usually need a
+  second pass.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

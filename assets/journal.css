@@ -1,0 +1,31 @@
+/* Journal entries and the journal index. Layered on top of lesson.css. */
+
+body { max-width: 42rem; padding-top: 2.5rem; }
+
+.kicker a { color: inherit; text-decoration: none; border-bottom: 1px solid var(--rule); }
+.kicker a:hover { border-bottom-color: var(--accent); }
+
+/* Entry section headings: quieter than a lesson's, since an entry is a log not a text. */
+.entry h2 {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: none;
+  margin: 2rem 0 0.5rem;
+  padding: 0;
+}
+.entry h2:first-of-type { margin-top: 1.6rem; }
+.entry p { margin: 0.6rem 0; }
+.entry ul { margin: 0.5rem 0; padding-left: 1.2rem; }
+.entry li { margin: 0.3rem 0; }
+
+/* Shared index-list look, also used by the front page. */
+ul.index { list-style: none; padding: 0; margin: 1rem 0 0; }
+ul.index li { border-top: 1px solid var(--rule); padding: 0.6rem 0; }
+ul.index li:last-child { border-bottom: 1px solid var(--rule); }
+ul.index a { font-weight: 600; text-decoration: none; }
+ul.index a:hover { text-decoration: underline; }
+ul.index .note { display: block; color: var(--ink-soft); font-size: 0.85rem;
+                 margin-top: 0.15rem; }

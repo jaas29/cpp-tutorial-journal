@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>26 Aug 2026 &mdash; The heap, a Vector, and a leak two builds could not see</title>
+<meta name="description" content="First real Project 1 code: a growable Vector with doubling reallocation. Plus the discovery that the dev preset hides leaks for a second, unrelated reason.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<link rel="stylesheet" href="../assets/journal.css">
+</head>
+<body>
+
+<p class="kicker"><a href="./">Journal</a> &middot; Wednesday 26 August 2026 &middot; Weeks 1&ndash;2 &middot; Project 1</p>
+<h1>The heap, a Vector, and a leak two builds could not see</h1>
+<div class="entry">
+<h2>Built</h2>
+<p><strong>The first code in this project that is actually Project 1</strong> &mdash; a growable
+<code>int</code> buffer with doubling reallocation, committed to
+<a href="https://github.com/jaas29/p1-containers">p1-containers</a>. About forty lines. It contains
+a memory leak, on purpose, which the next lessons exist to fix.</p>
+<p>Three lessons on the build system was enough.</p>
+
+<h2>Worked through</h2>
+<ul>
+  <li><a href="../lessons/0005-the-heap-and-your-first-vector.html">Lesson 5 &mdash; The Heap, and
+  Your First Vector</a>. Stack versus heap: the stack is where the compiler already knows the size
+  at compile time, and leaving a function throws it all away; the heap is what you ask for at
+  runtime when you do not know the size yet. That difference is the entire reason
+  <code>vector</code> has to exist.</li>
+  <li>Wrote <a href="../reference/vector-internals.html">the vector-internals sheet</a> &mdash;
+  size versus capacity, growth, reallocation, and which of those invalidates an iterator.</li>
+  <li>Did <a href="../lessons/recall-01-weeks-1-2.html">the weeks 1&ndash;2 recall quiz</a>, to find
+  out what had actually stuck rather than what I recognised.</li>
+</ul>
+
+<h2>Paired video</h2>
+<p>Lesson 5 pairs with The Cherno's <em>Stack vs Heap Memory in C++</em>, <em>POINTERS in
+C++</em>, and <em>The NEW Keyword in C++</em> &mdash; he draws what is happening in memory rather
+than describing it, which is how I follow this best. What I have actually watched and when is
+tracked in <a href="../videos.html">the video log</a>.</p>
+<p>Standing caveat on all of it: video is for intuition,
+<a href="https://www.learncpp.com/">learncpp</a> is for style. He uses raw <code>new</code> and
+<code>delete</code> throughout. Inside Project 1 that is fine and correct &mdash; writing a
+container means I <em>am</em> the one doing the manual memory. It does not carry into P2 or P3.</p>
+
+<h2>What broke</h2>
+<p>I verified Lesson 5 against the real Project 1 repo rather than a scratch build, and the leak
+disappeared. Same source, same compiler, only the flags different:</p>
+<pre><code>&lt;no extra flags&gt;                              -&gt; 1 leak for 48 total
+-fno-omit-frame-pointer                       -&gt; 1 leak for 48 total
+-fsanitize=undefined                          -&gt; 0 leaks for 0 total
+-fno-omit-frame-pointer -fsanitize=undefined  -&gt; 0 leaks for 0 total</code></pre>
+<p><code>-fsanitize=undefined</code> alone flips it. That is exactly what my <code>dev</code>
+preset turns on, which means <strong>neither of my two presets can find a leak</strong>: the
+<code>asan</code> one because LeakSanitizer does not exist on Darwin (yesterday's finding), and the
+<code>dev</code> one because UBSan's instrumentation hides the allocation from Apple's
+<code>leaks</code>. Two different causes, same silence.</p>
+
+<h2>What I took away</h2>
+<p>A clean sanitizer run is only evidence for the things that sanitizer actually checks on this
+platform. I now check leaks with a third, unflagged build rather than assuming the presets cover
+it. Recorded as
+<a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0006-ubsan-instrumentation-hides-leaks-from-leaks.md">learning
+record 0006</a>.</p>
+</div>
+</body>
+</html>

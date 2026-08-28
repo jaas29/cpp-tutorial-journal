@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>19 Aug 2026 &mdash; Two builds, and the shape of Project 1</title>
+<meta name="description" content="Lesson 2, the CMake reference sheet, and settling the build shape for Project 1: header-only, two presets, -Werror from day one.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<link rel="stylesheet" href="../assets/journal.css">
+</head>
+<body>
+
+<p class="kicker"><a href="./">Journal</a> &middot; Wednesday 19 August 2026 &middot; Weeks 1&ndash;2 &middot; Project 1</p>
+<h1>Two builds, and the shape of Project 1</h1>
+<div class="entry">
+<h2>Built</h2>
+<p>No code yet &mdash; this was deciding the shape of the Project 1 repository, which turns out to
+be a set of decisions I will have to defend rather than a thing I can just do.</p>
+<ul>
+  <li><strong>Header-only.</strong> <code>vector</code> and <code>unordered_map</code> are class
+  templates, so there is no code to compile until someone instantiates them. In CMake that is
+  <code>add_library(containers INTERFACE)</code> &mdash; a named bundle of include paths and flags
+  that compiles nothing of its own.</li>
+  <li><strong>Two presets, two build directories.</strong> <code>dev</code> (Apple clang, UBSan)
+  and <code>asan</code> (Homebrew clang, ASan + UBSan). Separate directories rather than separate
+  flag sets, because CMake caches the compiler per build directory, and object files from two
+  different toolchains must never be linked together. Separate directories make mixing them
+  structurally impossible instead of merely unlikely.</li>
+  <li><strong><code>-Werror</code> from day one</strong>, with <code>-Wall -Wextra
+  -Wpedantic</code>.</li>
+</ul>
+
+<h2>Worked through</h2>
+<ul>
+  <li><a href="../lessons/0002-two-builds-one-source-tree.html">Lesson 2 &mdash; Two Builds, One
+  Source Tree</a>.</li>
+  <li>Wrote <a href="../reference/cmake.html">the CMake and sanitizer reference sheet</a> so the
+  command lines are somewhere I can copy them from instead of rederiving them.</li>
+</ul>
+
+<h2>What broke</h2>
+<p>Homebrew's clang could not find <code>&lt;iostream&gt;</code> &mdash; it fails with
+<code>no such sysroot directory</code>. It does not inherit Apple's SDK path the way
+<code>/usr/bin/clang++</code> does, so it needs <code>-isysroot $(xcrun --show-sdk-path)</code>
+passed explicitly. Because a CMake preset is JSON and JSON cannot run a command, that path has to
+be written out literally in the preset, and it will need regenerating after an Xcode update.</p>
+
+<h2>What I took away</h2>
+<p>Both decisions are recorded with the reasoning in
+<a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0002-p1-build-shape-header-only-two-presets.md">learning
+record 0002</a>, specifically because they are the non-obvious kind that gets questioned in code
+review and I want the argument ready rather than reconstructed.</p>
+</div>
+</body>
+</html>

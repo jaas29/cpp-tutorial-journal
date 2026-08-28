@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 1 — Four Programs, Not One</title>
+<meta name="description" content="The four separate programs hiding behind one clang++ command: preprocessor, compiler, assembler, linker.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<link rel="stylesheet" href="../assets/quiz.css">
+</head>
+<body>
+
+<p class="kicker">Lesson 01 &middot; Project 1, week 1 &middot; C++ Tutorial</p>
+<h1>Four Programs, Not One</h1>
+<p class="standfirst">When you type <code>clang++ main.cpp</code>, four different programs run in
+sequence. Each fails in its own way. Today you take the pipeline apart by hand, and learn to name
+which of the four is the one complaining.</p>
+
+<h2><span class="num">Why this, first</span>The build is the thing you will fight most</h2>
+
+<p>You are about to write a <code>vector</code> from scratch. That is a header-heavy,
+multi-file, template-heavy project, and the errors it produces will be long. The single
+skill that separates people who enjoy that from people who suffer through it is <em>reading
+the error at the right layer</em>.</p>
+
+<p>An error that says <code>file not found</code> is not the same kind of problem as one that says
+<code>no matching function</code>, which is not the same kind of problem as
+<code>Undefined symbols</code> — even though all three come out of the same
+<code>clang++</code> command. They come from three different programs, which know three
+different amounts about your code. That is the whole lesson.</p>
+
+<div class="aside">
+  <span class="label">Mission link</span>
+  Your success criteria include reading a failure and knowing what kind of failure it is before
+  reaching for a debugger. This is that same habit, one level earlier: before the program can
+  crash, it has to build, and build failures have their own taxonomy.
+</div>
+
+<h2><span class="num">Knowledge</span>The pipeline</h2>
+
+<p>C++ compiles <strong>one file at a time, in total isolation</strong>. This is the fact that
+explains almost everything else about the language's file layout. The compiler working on
+<code>main.cpp</code> has no idea that <code>add.cpp</code> exists.</p>
+
+<figure>
+<svg viewBox="0 0 620 185" role="img" aria-labelledby="pipe-title">
+  <title id="pipe-title">Source files become translation units, then object files, then one executable</title>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,1 L9,5 L0,9" class="svg-stroke" stroke-width="1.4"/>
+    </marker>
+  </defs>
+
+  <!-- stage labels -->
+  <g class="svg-accent svg-mono" font-size="9" letter-spacing="1" text-anchor="middle">
+    <text x="147" y="14">PREPROCESS</text>
+    <text x="309" y="14">COMPILE + ASSEMBLE</text>
+    <text x="471" y="14">LINK</text>
+  </g>
+
+  <!-- row 1 -->
+  <rect x="10" y="40" width="112" height="42" rx="2" class="svg-box"/>
+  <text x="66" y="65" class="svg-ink svg-mono" font-size="10" text-anchor="middle">main.cpp</text>
+
+  <rect x="172" y="40" width="112" height="42" rx="2" class="svg-box"/>
+  <text x="228" y="57" class="svg-ink svg-mono" font-size="9.5" text-anchor="middle">main.cpp +</text>
+  <text x="228" y="70" class="svg-ink svg-mono" font-size="9.5" text-anchor="middle">iostream, add.h</text>
+
+  <rect x="334" y="40" width="112" height="42" rx="2" class="svg-box"/>
+  <text x="390" y="65" class="svg-ink svg-mono" font-size="10" text-anchor="middle">main.o</text>
+
+  <!-- row 2 -->
+  <rect x="10" y="118" width="112" height="42" rx="2" class="svg-box"/>
+  <text x="66" y="143" class="svg-ink svg-mono" font-size="10" text-anchor="middle">add.cpp</text>
+
+  <rect x="172" y="118" width="112" height="42" rx="2" class="svg-box"/>
+  <text x="228" y="135" class="svg-ink svg-mono" font-size="9.5" text-anchor="middle">add.cpp +</text>
+  <text x="228" y="148" class="svg-ink svg-mono" font-size="9.5" text-anchor="middle">add.h</text>
+
+  <rect x="334" y="118" width="112" height="42" rx="2" class="svg-box"/>
+  <text x="390" y="143" class="svg-ink svg-mono" font-size="10" text-anchor="middle">add.o</text>
+
+  <!-- executable -->
+  <rect x="496" y="79" width="114" height="42" rx="2" class="svg-box"/>
+  <text x="553" y="104" class="svg-ink svg-mono" font-size="10" text-anchor="middle">./prog</text>
+
+  <!-- arrows -->
+  <g class="svg-stroke" stroke-width="1.2" marker-end="url(#ah)">
+    <path d="M122,61 L166,61"/>
+    <path d="M284,61 L328,61"/>
+    <path d="M122,139 L166,139"/>
+    <path d="M284,139 L328,139"/>
+    <path d="M446,61 C472,61 474,100 490,100"/>
+    <path d="M446,139 C472,139 474,100 490,100"/>
+  </g>
+
+  <!-- column captions -->
+  <g class="svg-faint svg-serif" font-size="9.5" font-style="italic" text-anchor="middle">
+    <text x="66" y="178">what you wrote</text>
+    <text x="228" y="178">translation units</text>
+    <text x="390" y="178">object files</text>
+    <text x="553" y="178">executable</text>
+  </g>
+</svg>
+<figcaption>The two rows never see each other until the very last arrow. Everything painful about
+C++ file layout follows from that.</figcaption>
+</figure>
+
+<p>The four programs, and what each one knows:</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Program</th><th>Job</th><th>Knows about</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Preprocessor</strong></td>
+      <td>Textual find-and-replace. Pastes each <code>#include</code>d file in wholesale, expands macros, drops <code>#if</code> branches that don't apply.</td>
+      <td>Text. Not C++. It has no idea what a function is.</td>
+    </tr>
+    <tr>
+      <td><strong>Compiler</strong></td>
+      <td>Parses and type-checks one translation unit, then emits assembly for it.</td>
+      <td>One <code>.cpp</code> plus everything it included. Nothing else in your project.</td>
+    </tr>
+    <tr>
+      <td><strong>Assembler</strong></td>
+      <td>Turns that assembly text into machine code in an object file.</td>
+      <td>Almost nothing. It rarely fails on you.</td>
+    </tr>
+    <tr>
+      <td><strong>Linker</strong></td>
+      <td>Collects all object files and libraries, matches every use of a name to exactly one definition, writes the executable.</td>
+      <td>Names and addresses. Not types, not your source code.</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<p>The output of the preprocessor has a name you will see in error messages and in the standard:
+a <strong>translation unit</strong>. learncpp puts it exactly this way: <em>"When the
+preprocessor has finished processing a code file, the result is called a translation unit"</em>
+— one <code>.cpp</code> file plus every header it pulled in, recursively
+(<a href="https://www.learncpp.com/cpp-tutorial/introduction-to-the-preprocessor/">learncpp
+2.10</a>).</p>
+
+<h3>The division of labour that matters</h3>
+
+<p>A <strong>declaration</strong> is a promise that a name exists somewhere:
+<code>int add(int x, int y);</code>. A <strong>definition</strong> is the thing itself, with a
+body. The compiler is satisfied by promises. The linker is the one that collects the debts.</p>
+
+<p>That is why a missing function body is <em>not</em> a compiler error. The compiler saw the
+promise, believed you, and emitted a call to a name it assumed would show up later. Only the
+linker finds out that nobody ever provided it — and it says so with
+<code>Undefined symbols</code>, per <a href="https://www.learncpp.com/cpp-tutorial/programs-with-multiple-code-files/">learncpp 2.8</a>.</p>
+
+<h2><span class="num">Skill</span>Run the pipeline by hand</h2>
+
+<p>Do this now, in a scratch directory — <strong>not</strong> in this workspace, and not in your
+project repo. Something like <code>~/Projects/scratch/pipeline</code>. Three files:</p>
+
+<p class="filename">add.h</p>
+<pre><code>#pragma once
+int add(int x, int y);   // declaration: a promise
+</code></pre>
+
+<p class="filename">add.cpp</p>
+<pre><code>#include "add.h"
+int add(int x, int y) { return x + y; }   // definition: the real thing
+</code></pre>
+
+<p class="filename">main.cpp</p>
+<pre><code>#include &lt;iostream&gt;
+#include "add.h"
+
+int main() {
+    std::cout &lt;&lt; add(2, 3) &lt;&lt; '\n';
+}
+</code></pre>
+
+<p>Now stop each stage in turn and look at what came out. The flags are the point here: each one
+says <em>"run the pipeline, then halt"</em>.</p>
+
+<ol class="steps">
+
+<li>
+<p><strong>Stop after the preprocessor</strong> (<code>-E</code>) and see how much text one
+<code>#include</code> actually drags in:</p>
+<pre><code>clang++ -std=c++20 -E main.cpp | wc -l
+</code></pre>
+<p>On my machine: <strong>93,524 lines</strong>. You wrote six. That is what
+<code>#include &lt;iostream&gt;</code> costs, and it is why C++ builds are slow. Now try the
+small one, where you can read the whole output:</p>
+<pre><code>clang++ -std=c++20 -E -P add.cpp
+</code></pre>
+<pre><code>int add(int x, int y);
+int add(int x, int y) { return x + y; }
+</code></pre>
+<p>The <code>#include "add.h"</code> line is gone, replaced by the file's contents. That is
+literally all the preprocessor did. <code>-P</code> just suppresses line-number bookkeeping so
+the output is readable.</p>
+</li>
+
+<li>
+<p><strong>Stop after the compiler</strong> (<code>-S</code>) and read the assembly for
+<code>add</code>:</p>
+<pre><code>clang++ -std=c++20 -S -O1 add.cpp -o add.s
+</code></pre>
+<p>The interesting three lines, on arm64:</p>
+<pre><code>__Z3addii:
+    add  w0, w1, w0
+    ret
+</code></pre>
+<p>Your function is one instruction. Note the name it was given:
+<code>__Z3addii</code> — that is <code>add</code> taking <code>(int, int)</code>, encoded.
+C++ allows overloading, so the compiler <strong>mangles</strong> the types into the symbol name
+to keep the overloads distinct. Hold onto that; it explains a nasty error in a moment.</p>
+</li>
+
+<li>
+<p><strong>Stop after the assembler</strong> (<code>-c</code>) to get object files, and inspect
+their symbol tables with <code>nm</code>:</p>
+<pre><code>clang++ -std=c++20 -c add.cpp -o add.o
+clang++ -std=c++20 -c main.cpp -o main.o
+nm add.o
+nm -u main.o | head -3
+</code></pre>
+<pre><code>$ nm add.o
+0000000000000000 T __Z3addii        &lt;- T = defined here, in the Text section
+
+$ nm -u main.o
+__Unwind_Resume
+__Z3addii                           &lt;- -u = undefined: a hole to be filled
+...
+</code></pre>
+<p>This is the whole linking model, visible. <code>add.o</code> has the symbol.
+<code>main.o</code> has a hole with the same name. Neither file knows about the other.</p>
+</li>
+
+<li>
+<p><strong>Link, and run:</strong></p>
+<pre><code>clang++ add.o main.o -o prog
+./prog          # 5
+</code></pre>
+<p>The linker matched the hole to the symbol. Nothing more mysterious than that.</p>
+</li>
+
+</ol>
+
+<div class="aside">
+  <span class="label">Note</span>
+  <code>clang++ main.cpp add.cpp -o prog</code> does all four stages for both files in one go, and
+  is what you will actually type day to day (until CMake types it for you). You just did it the
+  long way once so that the short way stops being magic.
+</div>
+
+<h3>Break it on purpose</h3>
+
+<p>Now cause each failure deliberately. This is the part worth doing slowly — you are building an
+error-message-to-stage lookup table in your head, and the only way to get it is to see the real
+text.</p>
+
+<ol class="steps">
+  <li>In <code>main.cpp</code>, change the include to <code>#include "adder.h"</code>. Build. Undo.</li>
+  <li>Restore it, then change the call to <code>add(2)</code>. Build. Undo.</li>
+  <li>Restore it, then link <code>main.o</code> alone: <code>clang++ main.o -o bad</code>.</li>
+  <li>Restore it, then change only <code>add.cpp</code>'s definition to
+      <code>int add(int x, long y)</code>, leaving <code>add.h</code> as it was. Compile both
+      files, then link them.</li>
+</ol>
+
+<p>That last one is the trap. Both files compile without a single complaint — <code>add.cpp</code>
+just thinks it defined an unrelated overload — and then:</p>
+
+<pre><code>Undefined symbols for architecture arm64:
+  "add(int, int)", referenced from:
+      _main in main.o
+</code></pre>
+
+<p>Because <code>nm</code> on that object file now shows <code>__Z3addil</code> (…<code>int</code>,
+<code>long</code>), not <code>__Z3addii</code>. A declaration and definition that disagree produce
+two different mangled names, so the failure lands at link time, in a message that names neither
+file you edited. When you hit this for real in a header-plus-source pair, it will not look
+obvious. Now it will.</p>
+
+<h2><span class="num">Check</span>Which of the four is complaining?</h2>
+
+<p>Real output from Apple clang 17. Answer from memory, and commit before you click — a wrong
+answer you actually meant teaches more than a lucky one.</p>
+
+<div class="quiz" data-quiz data-title="Error triage">
+<ol class="quiz-items">
+
+  <li class="quiz-q" data-answer="1"
+      data-explain="The preprocessor's only job is pasting files in. It cannot find the file to paste, so it stops before any C++ is ever parsed — which is why it is <em>fatal</em> rather than an ordinary error.">
+    <p class="quiz-prompt">Which stage produced this?</p>
+    <pre><code>e1.cpp:1:10: fatal error: 'adder.h' file not found
+    1 | #include "adder.h"
+      |          ^~~~~~~~~</code></pre>
+    <ul class="quiz-options">
+      <li>The preprocessor</li>
+      <li>The compiler</li>
+      <li>The linker</li>
+    </ul>
+  </li>
+
+  <li class="quiz-q" data-answer="2"
+      data-explain="Type checking is the compiler's job, and the <code>note:</code> line pointing into <code>add.h</code> is the giveaway: it read the declaration, compared it to your call, and knows the argument count is wrong. It never needed the definition to say so.">
+    <p class="quiz-prompt">Which stage produced this?</p>
+    <pre><code>e2.cpp:2:20: error: no matching function for call to 'add'
+    2 | int main(){ return add(2); }
+      |                    ^~~
+./add.h:2:5: note: candidate function not viable:
+             requires 2 arguments, but 1 was provided</code></pre>
+    <ul class="quiz-options">
+      <li>The preprocessor</li>
+      <li>The compiler</li>
+      <li>The linker</li>
+    </ul>
+  </li>
+
+  <li class="quiz-q" data-answer="3"
+      data-explain="No line numbers, no source snippet, and it talks about <code>main.o</code> and an architecture — all signs you are past the compiler. Every use in <code>main.o</code> was legal; nobody supplied the definition.">
+    <p class="quiz-prompt">Which stage produced this?</p>
+    <pre><code>Undefined symbols for architecture arm64:
+  "add(int, int)", referenced from:
+      _main in main.o
+ld: symbol(s) not found for architecture arm64</code></pre>
+    <ul class="quiz-options">
+      <li>The preprocessor</li>
+      <li>The compiler</li>
+      <li>The linker</li>
+    </ul>
+  </li>
+
+  <li class="quiz-q" data-answer="3"
+      data-explain="This is the trap from the last exercise. Each file is internally consistent, so both compile. The mangled names disagree (<code>__Z3addii</code> vs <code>__Z3addil</code>), so the hole in <code>main.o</code> goes unfilled and the linker is the one that notices.">
+    <p class="quiz-prompt"><code>add.h</code> declares <code>int add(int, int)</code>.
+      <code>add.cpp</code> includes that header but defines
+      <code>int add(int, long)</code>. <code>main.cpp</code> calls <code>add(2, 3)</code>.
+      Where does the build first fail?</p>
+    <ul class="quiz-options">
+      <li>The preprocessor</li>
+      <li>The compiler</li>
+      <li>The linker</li>
+    </ul>
+  </li>
+
+</ol>
+</div>
+
+<div class="recall" data-recall>
+  <p class="recall-front"><strong>Say it out loud before revealing.</strong> Why does the compiler
+  accept a call to a function whose body does not exist anywhere in your project?</p>
+  <p class="recall-back">Because it compiles one translation unit in isolation and has no way to
+  see the rest of the project. A declaration is a promise that some <em>other</em> translation
+  unit will provide the definition; the compiler emits a call to that name and leaves a hole. Only
+  the linker, which sees every object file at once, can tell whether the promise was kept.</p>
+</div>
+
+<h2><span class="num">Next</span>Where to go from here</h2>
+
+<div class="source">
+  <span class="label">Primary source — read before the next lesson</span>
+  <p><a href="https://www.learncpp.com/cpp-tutorial/programs-with-multiple-code-files/">learncpp
+  2.8 — Programs with multiple code files</a>, then
+  <a href="https://www.learncpp.com/cpp-tutorial/header-files/">2.11 — Header files</a>. Together
+  they are about twenty minutes, and they cover the one thing this lesson deliberately left out:
+  the <em>rules</em> for what may go in a header versus a <code>.cpp</code>. You now have the
+  mechanism, so the rules should read as consequences rather than arbitrary style.</p>
+  <p>Optional and worth it: <a href="https://godbolt.org/">Compiler Explorer</a> is step 2 of
+  today's exercise as a live web page. Paste <code>add.cpp</code> in and watch the assembly change
+  as you edit.</p>
+</div>
+
+<p>Keep next to you while coding:
+<a href="../reference/toolchain.html">Reference — The Build Pipeline &amp; Error Triage</a> and the
+<a href="../reference/glossary.html">Glossary</a>. Both print cleanly; the triage table on the
+first one is the part you will use most in weeks 1–4.</p>
+
+<footer>
+  <p class="ask"><strong>Ask me things.</strong> I am your teacher for this, not just a document
+  generator. If the mangling scheme, <code>#pragma once</code>, what <code>ld</code> actually is,
+  or any error you hit doing the exercises is unclear — say so and we will go into it. A confusion
+  you name now is cheap; the same confusion inside a 400-line template error in week 3 is not.</p>
+  <p>Lesson 01 &middot; <em>Four Programs, Not One</em> &middot; C++ Tutorial, Fall 2026 &middot;
+  verified against Apple clang 17.0.0, arm64, <code>-std=c++20</code></p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

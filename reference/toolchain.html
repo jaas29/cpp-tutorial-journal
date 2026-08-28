@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reference — Build Pipeline &amp; Error Triage</title>
+<meta name="description" content="The build pipeline on this Mac, and how to triage an error back to the stage that produced it.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<style>
+  /* Reference sheets run denser than lessons and want the full page width. */
+  body { max-width: 46rem; padding-top: 2.5rem; font-size: 1rem; }
+  h2 { margin-top: 2rem; }
+  table { font-size: 0.83rem; }
+  pre { font-size: 0.76rem; }
+</style>
+</head>
+<body>
+
+<p class="kicker">Reference sheet &middot; C++ Tutorial</p>
+<h1>Build Pipeline &amp; Error Triage</h1>
+<p class="standfirst">One <code>clang++</code> command, four programs. Which one is talking to you,
+what it can and cannot know, and the flag that stops the pipeline there so you can look.</p>
+
+<h2>The four stages</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Stage</th><th>Stop after it</th><th>Produces</th><th>Sees</th><th>Typical failure</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Preprocess</strong></td>
+      <td><code>-E</code> (add <code>-P</code> to drop line markers)</td>
+      <td>a <em>translation unit</em>: one <code>.cpp</code> with every <code>#include</code> pasted in, recursively</td>
+      <td>text only</td>
+      <td><code>file not found</code>, macro nonsense</td>
+    </tr>
+    <tr>
+      <td><strong>Compile</strong></td>
+      <td><code>-S</code></td>
+      <td><code>.s</code> assembly</td>
+      <td>exactly one translation unit</td>
+      <td>syntax, types, overload resolution, template errors</td>
+    </tr>
+    <tr>
+      <td><strong>Assemble</strong></td>
+      <td><code>-c</code></td>
+      <td><code>.o</code> object file + symbol table</td>
+      <td>one <code>.s</code> file</td>
+      <td>almost never fails</td>
+    </tr>
+    <tr>
+      <td><strong>Link</strong></td>
+      <td>(the default: no flag)</td>
+      <td>executable</td>
+      <td>every <code>.o</code> and library at once — names only, no types</td>
+      <td><code>Undefined symbols</code>, <code>duplicate symbol</code></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<p><strong>The rule that explains the split:</strong> a <em>declaration</em> satisfies the compiler;
+only a <em>definition</em> satisfies the linker. The compiler believes promises. The linker
+collects debts.</p>
+
+<h2>Error triage table</h2>
+
+<p>Match the shape of the message, not the words. Compiler errors carry
+<code>file:line:col</code> and quote your source. Linker errors carry symbol names and an
+architecture, and often name no source line at all.</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Message</th><th>Stage</th><th>What it actually means</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>fatal error: 'x.h' file not found</code></td>
+      <td>preprocess</td>
+      <td>Wrong path, wrong quotes, or missing <code>-I</code> directory.</td>
+    </tr>
+    <tr>
+      <td><code>error: use of undeclared identifier 'add'</code></td>
+      <td>compile</td>
+      <td>No declaration is visible in <em>this</em> translation unit. You probably forgot the <code>#include</code>.</td>
+    </tr>
+    <tr>
+      <td><code>error: no matching function for call to 'add'</code></td>
+      <td>compile</td>
+      <td>A declaration is visible but no overload accepts these arguments. Read the <code>note: candidate</code> lines — they tell you which ones it tried.</td>
+    </tr>
+    <tr>
+      <td><code>error: incomplete type / member access into incomplete type</code></td>
+      <td>compile</td>
+      <td>Only a forward declaration is visible; this use needs the full definition.</td>
+    </tr>
+    <tr>
+      <td><code>Undefined symbols … referenced from: _main in main.o</code></td>
+      <td>link</td>
+      <td>Something used it, nothing defined it. Causes, in order of likelihood: (1) the <code>.cpp</code> was never passed to the compiler; (2) declaration and definition signatures disagree, so the mangled names differ; (3) you declared a member function and never wrote its body; (4) a library is missing.</td>
+    </tr>
+    <tr>
+      <td><code>duplicate symbol '…' in: a.o, b.o</code></td>
+      <td>link</td>
+      <td>Two translation units both defined it. Usually a non-<code>inline</code> function or a non-<code>inline</code> variable defined in a header that two <code>.cpp</code> files included.</td>
+    </tr>
+    <tr>
+      <td><em>builds fine, wrong output or crash</em></td>
+      <td>runtime</td>
+      <td>Nothing above can help. This is what the sanitizers are for.</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="aside">
+  <span class="label">Fast test</span>
+  Not sure whether an error is compile or link? Build with <code>-c</code>. If the error survives,
+  it is the compiler. If it disappears, it was the linker.
+</div>
+
+<h2>Inspecting object files</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Command</th><th>Shows</th></tr></thead>
+  <tbody>
+    <tr><td><code>nm foo.o</code></td><td>every symbol. <code>T</code> = defined here (text/code), <code>D</code> = defined data, <code>U</code> = undefined (a hole), lowercase = local to this file.</td></tr>
+    <tr><td><code>nm -u foo.o</code></td><td>undefined symbols only — the exact list the linker must satisfy.</td></tr>
+    <tr><td><code>nm foo.o | c++filt</code></td><td>the same, demangled: <code>__Z3addii</code> becomes <code>add(int, int)</code>.</td></tr>
+    <tr><td><code>echo '__Z3addii' | c++filt</code></td><td>demangle one name you copied out of an error message.</td></tr>
+    <tr><td><code>otool -L ./prog</code></td><td>which shared libraries the executable needs at run time (macOS; <code>ldd</code> on Linux).</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p><strong>Name mangling.</strong> C++ encodes the parameter types into the symbol name so overloads
+stay distinct. <code>__Z3addii</code> is <code>add</code> with two <code>int</code>s;
+<code>__Z3addil</code> is <code>add(int, long)</code>. Two names that differ by one letter are two
+unrelated functions to the linker — the reason a declaration/definition mismatch shows up as a
+missing symbol rather than a type error.</p>
+
+<h2>Flags worth memorising</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Flag</th><th>Effect</th></tr></thead>
+  <tbody>
+    <tr><td><code>-std=c++20</code></td><td>Pick the language version explicitly. Always set it; the default drifts between compilers.</td></tr>
+    <tr><td><code>-Wall -Wextra</code></td><td>Turn on the warnings that catch real bugs. Not on by default. Treat every one as an error to fix.</td></tr>
+    <tr><td><code>-Wpedantic</code></td><td>Warn on non-standard extensions — keeps code portable off your machine.</td></tr>
+    <tr><td><code>-g</code></td><td>Emit debug info: real function names and line numbers in crashes and in the debugger.</td></tr>
+    <tr><td><code>-O0</code> / <code>-O1</code> / <code>-O2</code> / <code>-O3</code></td><td>Optimisation level. <code>-O0</code> while debugging; <code>-O2</code> for any timing measurement. Never benchmark a <code>-O0</code> build.</td></tr>
+    <tr><td><code>-fsanitize=address</code></td><td>AddressSanitizer: catches out-of-bounds, use-after-free, double free, leaks. Pair with <code>-g</code>.</td></tr>
+    <tr><td><code>-fsanitize=undefined</code></td><td>UBSan: catches signed overflow, bad shifts, misaligned or null dereference.</td></tr>
+    <tr><td><code>-fno-omit-frame-pointer</code></td><td>Add alongside the sanitizers for readable stack traces.</td></tr>
+    <tr><td><code>-I&lt;dir&gt;</code></td><td>Another directory to search for <code>#include "..."</code> headers.</td></tr>
+    <tr><td><code>-o &lt;name&gt;</code></td><td>Name the output. Without it you get <code>a.out</code>.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Command lines to keep</h3>
+
+<pre><code># everyday build — Apple clang is fine here
+clang++ -std=c++20 -Wall -Wextra -g -O0 main.cpp add.cpp -o prog
+
+# UBSan — Apple clang is fine here too
+clang++ -std=c++20 -Wall -Wextra -g -fsanitize=undefined main.cpp add.cpp -o prog-ub
+
+# AddressSanitizer — MUST use Homebrew clang on this machine (see box below)
+CXX=/opt/homebrew/opt/llvm/bin/clang++
+$CXX -isysroot "$(xcrun --show-sdk-path)" \
+     -std=c++20 -Wall -Wextra -g -fno-omit-frame-pointer \
+     -fsanitize=address,undefined main.cpp add.cpp -o prog-san
+./prog-san
+
+# the build you take timings from
+clang++ -std=c++20 -O2 -DNDEBUG main.cpp add.cpp -o prog-fast
+</code></pre>
+
+<div class="aside">
+  <span class="label">This machine — read before Project 1</span>
+  <p><strong>Apple clang's AddressSanitizer is broken on macOS 26.5.</strong> An
+  <code>-fsanitize=address</code> binary built with <code>/usr/bin/clang++</code> compiles and links
+  fine, then <em>hangs on startup</em>, printing nothing. It is not your code and not a slow build.
+  Verified by sampling the stuck process: ASan's shadow-memory setup calls a macOS 26 dyld routine
+  that allocates memory, that allocation hits ASan's own intercepted <code>malloc</code>, and ASan
+  re-enters its initialiser and spins forever on the lock it is already holding.</p>
+  <p><strong>Use Homebrew LLVM for every ASan build</strong> (clang 22 ships a runtime without the
+  bug). It needs <code>-isysroot "$(xcrun --show-sdk-path)"</code> or it cannot find the system
+  headers. UBSan alone is unaffected — Apple clang is fine for that.</p>
+</div>
+
+<div class="aside">
+  <span class="label">Careful</span>
+  The sanitizers instrument your code; a sanitizer build runs several times slower and is not the
+  build you benchmark. Keep the two separate from day one. Sanitizer output is read
+  <strong>top down</strong>: the first block is the bad access, then <em>freed by</em>, then
+  <em>previously allocated by</em>. Within each stack, frame <code>#0</code> is usually inside the
+  ASan runtime — the first frame naming one of your files is the one you want.
+</div>
+
+<div class="aside">
+  <span class="label">ASan does not find leaks on macOS</span>
+  LeakSanitizer is not available on Darwin, so <code>-fsanitize=address</code> reports memory
+  errors but stays completely silent about leaked allocations. Use Apple's <code>leaks</code>
+  instead, on a normal (non-sanitizer) build, with the object out of scope before exit:
+  <pre><code>MallocStackLogging=1 leaks -atExit -- ./build/dev/tests</code></pre>
+  It prints the leaked byte count and a stack naming the <em>allocation</em> site with
+  <code>file:line</code>. Verified 2026-08-25 on this machine.
+</div>
+
+<h2>One-line glossary</h2>
+
+<ul>
+  <li><strong>Translation unit</strong> — one <code>.cpp</code> after preprocessing, with all its headers inlined. The unit the compiler actually compiles.</li>
+  <li><strong>Declaration</strong> — states that a name exists and what its type is. No body.</li>
+  <li><strong>Definition</strong> — provides the thing itself. Every declaration needs exactly one definition somewhere in the program.</li>
+  <li><strong>Object file</strong> — machine code for one translation unit, plus a symbol table of what it defines and what it still needs.</li>
+  <li><strong>Symbol</strong> — a name in an object file, mangled to encode its types.</li>
+  <li><strong>Linker</strong> (<code>ld</code>) — matches undefined symbols to defined ones across all object files and libraries, and writes the executable.</li>
+</ul>
+
+<p>Fuller definitions: <a href="glossary.html">Glossary</a>. Taught in:
+<a href="../lessons/0001-four-programs-not-one.html">Lesson 01 — Four Programs, Not One</a>.</p>
+
+<footer>
+  <p>Reference sheet &middot; verified against Apple clang 17.0.0, arm64. Symbol names on Linux/GCC
+  drop one leading underscore (<code>_Z3addii</code>); everything else here transfers.</p>
+</footer>
+
+</body>
+</html>

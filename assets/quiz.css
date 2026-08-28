@@ -1,0 +1,119 @@
+/* Styles for the quiz + recall components in quiz.js. Load after lesson.css. */
+
+.quiz {
+  border: 1px solid var(--rule);
+  padding: 1.2rem 1.3rem 1.3rem;
+  margin: 2rem 0;
+}
+
+.quiz-head {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.quiz-score { color: var(--ink-faint); }
+
+.quiz-items { list-style: none; padding: 0; margin: 0; counter-reset: qn; }
+
+.quiz-q {
+  counter-increment: qn;
+  margin: 0 0 1.6rem;
+  padding: 0;
+}
+.quiz-q:last-child { margin-bottom: 0; }
+
+.quiz-prompt { margin: 0 0 0.6rem; }
+.quiz-prompt::before {
+  content: "Q" counter(qn) ". ";
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+}
+.quiz-prompt pre { margin-top: 0.6rem; }
+
+.quiz-options { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.35rem; }
+.quiz-options li { margin: 0; }
+
+.quiz-opt {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-family: var(--serif);
+  font-size: 0.95rem;
+  line-height: 1.4;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  padding: 0.45rem 0.7rem;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.quiz-opt:hover:not(:disabled) { background: var(--code-bg); border-color: var(--ink-faint); }
+.quiz-opt:disabled { cursor: default; }
+.quiz-opt code { font-size: 0.85em; }
+
+.quiz-opt[data-state="correct"] {
+  border-color: var(--ok);
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 8%, var(--paper));
+}
+.quiz-opt[data-state="wrong"] {
+  border-color: var(--bad);
+  color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 8%, var(--paper));
+}
+.quiz-opt[data-state="missed"] { border-color: var(--ok); color: var(--ok); }
+.quiz-opt[data-state="off"] { opacity: 0.45; }
+
+.quiz-mark {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  float: right;
+  margin-left: 0.6rem;
+}
+
+.quiz-explain {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--ink-soft);
+  border-left: 2px solid var(--rule);
+  padding: 0.1rem 0 0.1rem 0.8rem;
+  margin: 0.6rem 0 0;
+}
+.quiz-explain[hidden] { display: none; }
+
+/* --- recall cards ----------------------------------------------------- */
+
+.recall {
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  padding: 0.9rem 0;
+  margin: 1.6rem 0;
+}
+.recall-front { margin: 0 0 0.6rem; }
+.recall-btn {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--rule);
+  padding: 0.32rem 0.7rem;
+  cursor: pointer;
+}
+.recall-btn:hover { background: var(--code-bg); }
+.recall-back { margin: 0.7rem 0 0; font-size: 0.95rem; color: var(--ink-soft); }
+.recall-back[hidden] { display: none; }
+
+@media print {
+  .quiz-opt { border-color: #bbb; }
+  .quiz-explain, .recall-back { display: block !important; }
+  .recall-btn { display: none; }
+}

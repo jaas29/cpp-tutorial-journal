@@ -1,0 +1,12 @@
+# Private working material. Never leaves this machine via this repo.
+# The pre-commit hook enforces this a second time, in case someone uses `git add -f`.
+private/
+
+# Personal working notes, not coursework.
+NOTES.md
+
+# Build output and OS noise.
+build/
+.DS_Store
+*.o
+*.dSYM/

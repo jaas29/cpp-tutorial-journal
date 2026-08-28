@@ -1,0 +1,291 @@
+/* Shared stylesheet for all lessons and reference sheets in this workspace.
+   Goals: readable on screen, clean on paper, one consistent course look. */
+
+:root {
+  --ink: #16150f;
+  --ink-soft: #55524a;
+  --ink-faint: #8a867c;
+  --paper: #fffdf8;
+  --rule: #ddd8cc;
+  --accent: #8a2f13;
+  --accent-soft: #f4ebe4;
+  --code-bg: #f5f2ea;
+  --ok: #1c5f34;
+  --bad: #9b2216;
+  --serif: "Palatino", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  --mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --measure: 38rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ink: #ece7dc;
+    --ink-soft: #b3ada0;
+    --ink-faint: #837e73;
+    --paper: #16150f;
+    --rule: #34322a;
+    --accent: #e08a5f;
+    --accent-soft: #2a231d;
+    --code-bg: #1f1e17;
+    --ok: #6fc98a;
+    --bad: #e8806f;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0 auto;
+  padding: 4rem 1.5rem 8rem;
+  max-width: var(--measure);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 1.0625rem;
+  line-height: 1.62;
+  text-rendering: optimizeLegibility;
+}
+
+/* --- masthead --------------------------------------------------------- */
+
+.kicker {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin: 0 0 0.75rem;
+}
+
+h1 {
+  font-size: 2rem;
+  line-height: 1.15;
+  font-weight: normal;
+  letter-spacing: -0.01em;
+  margin: 0 0 0.5rem;
+}
+
+.standfirst {
+  font-size: 1.15rem;
+  line-height: 1.5;
+  color: var(--ink-soft);
+  font-style: italic;
+  margin: 0 0 2.5rem;
+}
+
+h2 {
+  font-size: 1.3rem;
+  font-weight: normal;
+  margin: 3rem 0 0.25rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--rule);
+}
+
+h2 .num {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--accent);
+  display: block;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.3rem;
+}
+
+h3 {
+  font-size: 1.02rem;
+  font-weight: bold;
+  margin: 1.9rem 0 0.4rem;
+}
+
+p { margin: 0 0 1rem; }
+
+ul, ol { margin: 0 0 1rem; padding-left: 1.4rem; }
+li { margin-bottom: 0.4rem; }
+li > ul, li > ol { margin-top: 0.4rem; }
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+a:hover { border-bottom-color: var(--accent); }
+
+strong { font-weight: bold; }
+
+code, kbd, samp {
+  font-family: var(--mono);
+  font-size: 0.855em;
+  background: var(--code-bg);
+  padding: 0.1em 0.32em;
+  border-radius: 3px;
+}
+
+pre {
+  background: var(--code-bg);
+  border-left: 2px solid var(--rule);
+  padding: 0.9rem 1rem;
+  overflow-x: auto;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  margin: 0 0 1rem;
+}
+pre code { background: none; padding: 0; font-size: 1em; }
+
+.filename {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin: 1.1rem 0 0.25rem;
+}
+
+/* --- asides and callouts ---------------------------------------------- */
+
+.aside {
+  border-left: 2px solid var(--accent);
+  padding: 0.15rem 0 0.15rem 1rem;
+  margin: 1.6rem 0;
+  font-size: 0.95rem;
+  color: var(--ink-soft);
+}
+.aside .label {
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  display: block;
+  margin-bottom: 0.3rem;
+}
+
+.source {
+  background: var(--accent-soft);
+  padding: 1rem 1.2rem;
+  margin: 2rem 0;
+  font-size: 0.95rem;
+}
+.source .label {
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  display: block;
+  margin-bottom: 0.4rem;
+}
+.source p:last-child { margin-bottom: 0; }
+
+/* --- tables ----------------------------------------------------------- */
+
+.table-wrap { overflow-x: auto; margin: 0 0 1.2rem; }
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.88rem;
+}
+th, td {
+  text-align: left;
+  padding: 0.5rem 0.7rem 0.5rem 0;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+th {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  font-weight: normal;
+  border-bottom: 1px solid var(--ink-faint);
+}
+td code { font-size: 0.82em; }
+
+/* --- pipeline diagram ------------------------------------------------- */
+
+figure { margin: 1.8rem 0; }
+figure svg { width: 100%; height: auto; display: block; }
+figcaption {
+  font-size: 0.82rem;
+  color: var(--ink-faint);
+  margin-top: 0.5rem;
+  line-height: 1.45;
+}
+.svg-ink { fill: var(--ink); }
+.svg-soft { fill: var(--ink-soft); }
+.svg-faint { fill: var(--ink-faint); }
+.svg-accent { fill: var(--accent); }
+.svg-stroke { stroke: var(--ink-soft); fill: none; }
+.svg-rule { stroke: var(--rule); fill: none; }
+.svg-box { fill: var(--code-bg); stroke: var(--rule); }
+.svg-mono { font-family: var(--mono); }
+.svg-serif { font-family: var(--serif); }
+
+/* --- checklist (do-this-now steps) ----------------------------------- */
+
+.steps { list-style: none; padding: 0; counter-reset: step; }
+.steps > li {
+  counter-increment: step;
+  position: relative;
+  padding-left: 2.1rem;
+  margin-bottom: 1.1rem;
+}
+.steps > li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0.1em;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--accent);
+  border: 1px solid var(--rule);
+  border-radius: 50%;
+  width: 1.5rem;
+  height: 1.5rem;
+  display: grid;
+  place-items: center;
+}
+
+/* --- footer ----------------------------------------------------------- */
+
+footer {
+  margin-top: 4rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rule);
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+footer h2 { border: none; margin-top: 1rem; padding-top: 0; font-size: 1rem; }
+.ask {
+  font-style: italic;
+  border-left: 2px solid var(--accent);
+  padding-left: 1rem;
+  margin: 1.5rem 0;
+}
+
+/* --- print ------------------------------------------------------------ */
+
+@media print {
+  :root {
+    --paper: #fff;
+    --ink: #000;
+    --ink-soft: #333;
+    --ink-faint: #666;
+    --code-bg: #f2f2f2;
+    --accent: #000;
+    --accent-soft: #f2f2f2;
+    --rule: #bbb;
+  }
+  body { padding: 0; max-width: none; font-size: 10.5pt; }
+  a { color: #000; border: none; }
+  a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-family: var(--mono);
+    font-size: 0.72em;
+    color: #555;
+    word-break: break-all;
+  }
+  h2, h3 { break-after: avoid; }
+  pre, table, figure, .quiz { break-inside: avoid; }
+  .no-print { display: none !important; }
+}

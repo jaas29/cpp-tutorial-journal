@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 3 — The Linker Only Sees What You Listed</title>
+<meta name="description" content="Undefined symbol errors, and why dropping a .cpp into src/ does not put it in the build.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<link rel="stylesheet" href="../assets/quiz.css">
+</head>
+<body>
+
+<p class="kicker">Lesson 03 &middot; Unscheduled &middot; from your own broken build</p>
+<h1>The Linker Only Sees What You Listed</h1>
+<p class="standfirst">You split <code>Log</code> into its own file while following The Cherno, and
+the build stopped working. Nothing is wrong with your C++. The compiler read both files and was
+satisfied. What broke is one line of <code>CMakeLists.txt</code> — and understanding exactly why
+is worth more than the fix, because this error will find you again in every project this term.</p>
+
+<h2><span class="num">Why this, now</span>You hit it, so learn it properly</h2>
+
+<p>This is the first error you have seen that is <em>not</em> a compiler error. Telling those two
+apart on sight is a real skill, and it is on your mission list: <em>"read a crash and know what it
+is before reaching for the debugger."</em> Link errors are the easier cousin of that skill, and you
+have a live one to practise on.</p>
+
+<div class="aside">
+  <span class="label">Prerequisite</span>
+  This lesson assumes <a href="./0001-four-programs-not-one.html">Lesson 1</a> — preprocessor,
+  compiler, assembler, linker as four separate programs — and
+  <a href="./0002-two-builds-one-source-tree.html">Lesson 2</a>, where
+  <code>add_executable</code> first appeared.
+</div>
+
+<h2><span class="num">Knowledge</span>Read the error before anything else</h2>
+
+<p>Here is what your build actually printed. Read it as three separate facts, not one blob:</p>
+
+<pre><code>Undefined symbols for architecture arm64:
+  "Log(char const*)", referenced from:
+      ltmp1 in main.cpp.o
+ld: symbol(s) not found for architecture arm64</code></pre>
+
+<ul>
+  <li><strong><code>ld:</code></strong> — the last line names the program that failed. Not
+  <code>clang++</code> compiling; <code>ld</code>, the linker. Everything compiled fine.</li>
+  <li><strong><code>referenced from ... main.cpp.o</code></strong> — the file that <em>wants</em>
+  the symbol. It is never the file with the problem.</li>
+  <li><strong><code>"Log(char const*)"</code></strong> — the symbol nobody supplied. Note the
+  full signature, not just the name. That detail matters later in this lesson.</li>
+</ul>
+
+<p>A compiler error names a line in a <code>.cpp</code> file and a column. A linker error names a
+<em>symbol</em> and an <code>.o</code> file. That difference alone tells you which half of the
+pipeline to go looking in.</p>
+
+<h3>What your two files each promised</h3>
+
+<p><code>main.cpp</code> contains a <strong>declaration</strong>:</p>
+
+<p class="filename">src/main.cpp</p>
+<pre><code>void Log(const char* message);   // a promise, not a body</code></pre>
+
+<p>A declaration tells the compiler the <em>shape</em> of <code>Log</code>: it takes a
+<code>const char*</code>, it returns nothing. That is everything the compiler needs to check the
+call site and emit the right calling sequence. It does not need the body, and it does not go
+looking for one. It emits a call to a symbol and leaves a note: <em>somebody fill this in later.</em></p>
+
+<p>You can see the note. <code>nm</code> lists the symbols in an object file, and
+<code>-u</code> shows only the undefined ones — the holes:</p>
+
+<pre><code>$ nm -u build/CMakeFiles/mystl.dir/src/main.cpp.o
+__Z3LogPKc
+___cxa_atexit
+___dso_handle</code></pre>
+
+<p><code>__Z3LogPKc</code> is <code>Log(char const*)</code> after <em>name mangling</em> — the
+scheme C++ uses to encode a function's parameter types into its symbol name, so that overloads
+end up with distinct symbols. <code>PKc</code> is "pointer to const char". Pipe it through
+<code>c++filt</code> to read it back:</p>
+
+<pre><code>$ nm -u build/CMakeFiles/mystl.dir/src/main.cpp.o | c++filt
+Log(char const*)</code></pre>
+
+<p>Meanwhile <code>Log.cpp</code> contains a <strong>definition</strong> — a declaration plus a
+body — and compiling it alone by hand produces exactly the symbol that hole is asking for. In
+<code>nm</code>'s output, <code>T</code> means "defined here, in the text (code) section":</p>
+
+<pre><code>$ clang++ -std=c++20 -c src/Log.cpp -o /tmp/Log.o
+$ nm /tmp/Log.o | grep ' T __Z3Log'
+0000000000000000 T __Z3LogPKc</code></pre>
+
+<p>So the supply exists. The two halves simply never met.</p>
+
+<h2><span class="num">The mechanism</span>Nothing crawls your <code>src/</code> directory</h2>
+
+<p>Here is the assumption that broke you, and it is the natural one to make: <em>I put
+<code>Log.cpp</code> in <code>src/</code> next to <code>main.cpp</code>, so it is part of the
+project.</em></p>
+
+<p>It is not. No part of the toolchain ever looks in a directory to find out what your program is
+made of. The compiler is handed <em>one</em> file at a time and knows nothing about any other. The
+linker is handed a <em>list</em> of <code>.o</code> files and knows nothing about any file not on
+that list. The only place that list is written down is <code>add_executable</code>.</p>
+
+<figure>
+<svg viewBox="0 0 720 300" role="img" aria-label="Diagram: CMakeLists source list determines which cpp files become object files, and only those object files reach the linker.">
+  <text x="0" y="14" class="svg-faint svg-mono" font-size="11">SOURCE TREE</text>
+  <text x="250" y="14" class="svg-faint svg-mono" font-size="11">CMakeLists.txt</text>
+  <text x="500" y="14" class="svg-faint svg-mono" font-size="11">LINKER INPUT</text>
+
+  <!-- source files -->
+  <rect x="0" y="30" width="150" height="34" rx="3" class="svg-box"/>
+  <text x="12" y="52" class="svg-ink svg-mono" font-size="12">src/main.cpp</text>
+
+  <rect x="0" y="86" width="150" height="34" rx="3" class="svg-box"/>
+  <text x="12" y="108" class="svg-ink svg-mono" font-size="12">src/Log.cpp</text>
+
+  <!-- the list -->
+  <rect x="240" y="24" width="200" height="102" rx="3" class="svg-box"/>
+  <text x="254" y="46" class="svg-soft svg-mono" font-size="11">add_executable(mystl</text>
+  <text x="266" y="66" class="svg-ink svg-mono" font-size="11">src/main.cpp</text>
+  <text x="266" y="86" class="svg-accent svg-mono" font-size="11">src/Log.cpp</text>
+  <text x="254" y="106" class="svg-soft svg-mono" font-size="11">)</text>
+
+  <!-- arrows in -->
+  <path d="M150 47 L236 60" class="svg-rule" stroke-width="1"/>
+  <path d="M150 103 L236 82" class="svg-rule" stroke-width="1"/>
+
+  <!-- objects -->
+  <rect x="500" y="30" width="170" height="34" rx="3" class="svg-box"/>
+  <text x="512" y="52" class="svg-ink svg-mono" font-size="12">main.cpp.o</text>
+  <text x="600" y="52" class="svg-faint svg-mono" font-size="10">needs Log</text>
+
+  <rect x="500" y="86" width="170" height="34" rx="3" class="svg-box"/>
+  <text x="512" y="108" class="svg-ink svg-mono" font-size="12">Log.cpp.o</text>
+  <text x="600" y="108" class="svg-accent svg-mono" font-size="10">has Log</text>
+
+  <path d="M440 60 L496 47" class="svg-rule" stroke-width="1"/>
+  <path d="M440 82 L496 103" class="svg-rule" stroke-width="1"/>
+
+  <!-- linker -->
+  <rect x="500" y="150" width="170" height="34" rx="3" class="svg-box"/>
+  <text x="512" y="172" class="svg-soft svg-mono" font-size="12">ld  &#8594;  mystl</text>
+  <path d="M585 120 L585 146" class="svg-rule" stroke-width="1"/>
+
+  <!-- the broken case -->
+  <line x1="0" y1="212" x2="720" y2="212" class="svg-rule" stroke-width="1" stroke-dasharray="3 3"/>
+  <text x="0" y="236" class="svg-faint svg-mono" font-size="11">WHAT YOU HAD</text>
+  <text x="240" y="256" class="svg-soft svg-mono" font-size="11">add_executable(mystl</text>
+  <text x="252" y="274" class="svg-ink svg-mono" font-size="11">src/main.cpp</text>
+  <text x="252" y="292" class="svg-faint svg-mono" font-size="11">)</text>
+  <text x="0" y="262" class="svg-soft svg-serif" font-size="12">Log.cpp sits in src/,</text>
+  <text x="0" y="280" class="svg-soft svg-serif" font-size="12">never compiled, never linked.</text>
+  <text x="500" y="262" class="svg-accent svg-mono" font-size="11">Log.cpp.o</text>
+  <text x="500" y="280" class="svg-soft svg-serif" font-size="12">was never produced.</text>
+</svg>
+<figcaption>The source list in <code>add_executable</code> is the <em>only</em> definition of what
+your program is made of. A <code>.cpp</code> file not on that list is not compiled, produces no
+object file, and contributes no symbols — no matter where it sits on disk.</figcaption>
+</figure>
+
+<p>Notice what <code>#include</code> did <em>not</em> do here. You did not include anything from
+<code>Log.cpp</code>, but even if you had written a header and included it, the outcome would be
+identical. <code>#include</code> is a paste operation performed by the preprocessor, and headers
+carry <em>declarations</em>. Declarations satisfy the compiler. Only object files satisfy the
+linker, and object files come from the source list.</p>
+
+<h2><span class="num">Practice</span>Do this now</h2>
+
+<ol class="steps">
+  <li><p>Confirm the diagnosis before applying the fix. In <code>mystl/</code>, look at the hole:</p>
+  <pre><code>nm -u build/CMakeFiles/mystl.dir/src/main.cpp.o | c++filt</code></pre>
+  <p>You should see <code>Log(char const*)</code>. Then confirm no <code>Log.cpp.o</code> exists
+  anywhere:</p>
+  <pre><code>find build -name '*.o' | grep -i log</code></pre>
+  <p>Empty output. That is the whole bug, visible in two commands.</p></li>
+
+  <li><p>Add the file to the target in <code>CMakeLists.txt</code>:</p>
+  <p class="filename">CMakeLists.txt</p>
+  <pre><code>add_executable(mystl
+    src/main.cpp
+    src/Log.cpp
+)</code></pre></li>
+
+  <li><p>Build. You do not need to reconfigure by hand — the generated <code>Makefile</code> has
+  a rule that notices <code>CMakeLists.txt</code> changed and reruns CMake for you:</p>
+  <pre><code>cmake --build build</code></pre>
+  <p>Watch the output. It says <code>Configuring done</code>, then compiles
+  <code>Log.cpp.o</code>, then links. It does <em>not</em> recompile <code>main.cpp</code> — that
+  object file was already correct, and always was.</p></li>
+
+  <li><p>Run it, and confirm the exit code while you are there:</p>
+  <pre><code>./build/mystl
+echo $?</code></pre>
+  <p><code>hello world</code>, then <code>0</code>.</p></li>
+</ol>
+
+<h2><span class="num">The subtle version</span>The same error, a different cause</h2>
+
+<p>Now the trap that catches people who have already learned the lesson above. Two files, both
+compiled, both linked — and still an undefined symbol:</p>
+
+<pre><code>// a.cpp
+void Log(const char* m);          // declares Log(char const*)
+int main(){ Log("hi"); }
+
+// b.cpp
+void Log(char* m){ /* ... */ }    // defines Log(char*)   &#8592; not const</code></pre>
+
+<pre><code>$ clang++ -std=c++20 a.cpp b.cpp -o demo
+Undefined symbols for architecture arm64:
+  "Log(char const*)", referenced from:
+      _main in a-b202d1.o</code></pre>
+
+<p>Both files were compiled. Neither is missing. But because of name mangling, <code>Log(char
+const*)</code> and <code>Log(char*)</code> are <em>different symbols</em> — the linker matches on
+the mangled name, which encodes the parameter types, so a one-word difference in a signature makes
+the two halves invisible to each other. C++ overloading is exactly this mechanism working as
+intended; a typo'd signature is the same mechanism working against you.</p>
+
+<div class="aside">
+  <span class="label">The habit that prevents it</span>
+  Never hand-write a declaration in the file that calls the function, the way <code>main.cpp</code>
+  does today. Put the declaration in a header, and <code>#include</code> that header from
+  <em>both</em> <code>main.cpp</code> and <code>Log.cpp</code>. Then the definition and the call
+  site read the same text, and a mismatch becomes a <em>compiler</em> error at the definition —
+  caught earlier, and with a line number. That refactor is the next lesson.
+</div>
+
+<h2><span class="num">Retrieval</span>Check yourself</h2>
+
+<div class="quiz" data-quiz data-title="Link-time triage">
+<ol class="quiz-items">
+
+  <li class="quiz-q" data-answer="3"
+      data-explain="A compiler error names a file and a line number, because the compiler is reading your text. A linker error names a mangled symbol and an object file, because <code>ld</code> has never seen your source — only the symbol tables of <code>.o</code> files.">
+    <p class="quiz-prompt">An error names a symbol and a <code>.o</code> file. Which stage?</p>
+    <ul class="quiz-options">
+      <li>Preprocessor expanding a header</li>
+      <li>Compiler checking your call site</li>
+      <li>Linker resolving an undefined symbol</li>
+    </ul>
+  </li>
+
+  <li class="quiz-q" data-answer="2"
+      data-explain="A declaration gives the compiler the signature, which is all it needs to emit a call. It records an undefined symbol and moves on. The body is the linker's problem, not the compiler's.">
+    <p class="quiz-prompt">A declaration with no body anywhere. What does the compiler do?</p>
+    <ul class="quiz-options">
+      <li>Errors, because the body is missing</li>
+      <li>Succeeds, leaving an undefined symbol</li>
+      <li>Searches other files for the body</li>
+    </ul>
+  </li>
+
+  <li class="quiz-q" data-answer="1"
+      data-explain="Nothing scans directories. <code>add_executable</code> is the only statement of which translation units exist, so a file absent from it is never compiled and produces no object file at all.">
+    <p class="quiz-prompt">A new <code>.cpp</code> sits in <code>src/</code>. What builds it?</p>
+    <ul class="quiz-options">
+      <li>Nothing, until CMakeLists lists it</li>
+      <li>CMake, which globs the source folder</li>
+      <li>The linker, when a symbol needs it</li>
+    </ul>
+  </li>
+
+  <li class="quiz-q" data-answer="3"
+      data-explain="Mangled names encode parameter types, so <code>Log(char*)</code> and <code>Log(char const*)</code> are two unrelated symbols. That is precisely what makes overloading possible, and precisely what makes a mistyped signature invisible.">
+    <p class="quiz-prompt">Both files compiled, yet <code>Log</code> is undefined. Likely cause?</p>
+    <ul class="quiz-options">
+      <li>The header was included in order</li>
+      <li>The object files were built twice</li>
+      <li>The signatures differ, so symbols differ</li>
+    </ul>
+  </li>
+
+</ol>
+</div>
+
+<div class="recall" data-recall>
+  <p class="recall-front">Say out loud: why does adding a <code>.cpp</code> file to
+  <code>src/</code> change nothing until you edit <code>CMakeLists.txt</code>?</p>
+  <p class="recall-back">Because compilation is per-file and the file list is explicit. The
+  compiler is invoked once per source file named in <code>add_executable</code>, and each
+  invocation sees only that one file. A <code>.cpp</code> not on the list is never handed to the
+  compiler, so no object file is produced, so its symbols never enter the set the linker searches.
+  Location on disk is irrelevant — nothing in the toolchain scans directories to discover sources.</p>
+</div>
+
+<h2><span class="num">Next</span>Where to go from here</h2>
+
+<div class="source">
+  <span class="label">Primary source — you are already watching it</span>
+  <p>The Cherno,
+  <a href="https://www.youtube.com/watch?v=H4s55GgAg0I">How the C++ Linker Works</a> (~30 min).
+  This is the episode your bug came from, and it is the best video explanation of linking there is
+  — he breaks the build on purpose and reads the errors, which is exactly the skill above. Watch
+  <a href="https://www.youtube.com/watch?v=3tIqpEmWMLI">How the C++ Compiler Works</a> first if you
+  have not; the pair belong together.</p>
+  <p>For the written version, learncpp
+  <a href="https://www.learncpp.com/cpp-tutorial/forward-declarations/">2.7 — Forward declarations
+  and definitions</a> and
+  <a href="https://www.learncpp.com/cpp-tutorial/programs-with-multiple-code-files/">2.8 — Programs
+  with multiple code files</a>. Where The Cherno's style differs from learncpp, learncpp wins —
+  his videos predate a lot of modern C++.</p>
+</div>
+
+<p>Keep next to you while coding:
+<a href="../reference/toolchain.html">Reference — The Build Pipeline &amp; Error Triage</a>,
+<a href="../reference/cmake.html">Reference — CMake &amp; Sanitizer Builds</a>, and the
+<a href="../reference/glossary.html">Glossary</a>.</p>
+
+<p><strong>Lesson 4</strong> turns that hand-written declaration into a real header —
+<code>include/mystl/Log.hpp</code> — included by both files, which is where include guards,
+<code>#pragma once</code>, and the one-definition rule become things you need rather than trivia.
+That is also the shape <code>vector.hpp</code> needs, so it is Project 1 work, not a detour.</p>
+
+<footer>
+  <p class="ask"><strong>Ask me things.</strong> Why <code>const char*</code> and not
+  <code>std::string</code>, what the other symbols in <code>nm</code>'s output are, why
+  <code>file(GLOB ...)</code> looks like it solves the source-list problem but should not be used,
+  or what a <em>duplicate</em> symbol error looks like from the other direction — say so and we
+  will go into it.</p>
+  <p>Lesson 03 &middot; <em>The Linker Only Sees What You Listed</em> &middot; C++ Tutorial, Fall
+  2026 &middot; verified against your <code>mystl</code> tree, CMake 4.4.2, Apple clang 17.0.0,
+  arm64, <code>-std=c++20</code></p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

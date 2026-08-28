@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>25 Aug 2026 &mdash; Asking why CMake exists, and getting an argument</title>
+<meta name="description" content="Lesson 4, the newcpp scaffolding script, the Project 1 build system committed, and the discovery that AddressSanitizer cannot find leaks on macOS at all.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<link rel="stylesheet" href="../assets/journal.css">
+</head>
+<body>
+
+<p class="kicker"><a href="./">Journal</a> &middot; Tuesday 25 August 2026 &middot; Weeks 1&ndash;2 &middot; Project 1</p>
+<h1>Asking why CMake exists, and getting an argument</h1>
+<div class="entry">
+<h2>Built</h2>
+<ul>
+  <li><strong>Project 1's build system, committed.</strong> Two presets, warnings as errors &mdash;
+  the shape settled on 19 August, now real, in
+  <a href="https://github.com/jaas29/p1-containers">p1-containers</a>.</li>
+  <li><strong><code>newcpp</code></strong>, a small bash script at <code>~/.local/bin/newcpp</code>
+  that scaffolds a throwaway C++ project: CMakeLists, <code>src/main.cpp</code>, a
+  <code>.gitignore</code>, a git repo, a configured <code>build/</code>, and a
+  <code>compile_commands.json</code> symlink so the editor knows what is going on. Then it builds
+  once, so I know the project works before I have written anything. <code>-DSAN=ON</code> adds
+  sanitizers and supplies Homebrew clang's <code>-isysroot</code> itself.</li>
+  <li>Wrote it up as <a href="../reference/new-project.html">a runbook</a>, including a
+  <strong>Visual Studio to macOS translation table</strong>. Nearly all C++ video is Visual Studio
+  on Windows, and that was the real thing slowing me down &mdash; not the C++, the
+  button-pressing.</li>
+  <li>Wrote <a href="../reference/toolchain.html">the toolchain and error-triage sheet</a>.</li>
+</ul>
+
+<h2>Asked</h2>
+<p>I asked why we need CMake at all, since I had already compiled and linked by hand and could not
+see what it was doing that I could not type myself. The answer was to build the thing by hand
+first and then break it three ways:</p>
+<ul>
+  <li><strong>Flag drift.</strong> The same flag list repeated per file, with nothing enforcing
+  that they match.</li>
+  <li><strong>No dependency graph</strong> &mdash; the one that actually matters. A shell script
+  cannot know which <code>.cpp</code> included which header, so it has to rebuild everything or
+  risk linking stale object files. We watched this live: editing a <code>.cpp</code> rebuilt one
+  file, editing a header rebuilt all three, and then opened
+  <code>build/CMakeFiles/app.dir/compiler_depend.make</code> to see where CMake had written that
+  knowledge down.</li>
+  <li><strong>Two configurations.</strong> My <code>dev</code>/<code>asan</code> split doubles
+  every command if I am doing it by hand.</li>
+</ul>
+<p>So: CMake is a <em>generator</em>, not a compiler and not a build system. Recorded as
+<a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0004-cmake-is-a-generator-not-a-compiler.md">learning
+record 0004</a>.</p>
+
+<h2>What broke</h2>
+<p>While preparing the next lesson, whose whole hook was going to be "write a Vector with no
+destructor and let AddressSanitizer show you the leak." I tested it first. It does not work.</p>
+<p>A deliberately leaking Vector, built with <code>-fsanitize=address,undefined</code> and run with
+<code>ASAN_OPTIONS=detect_leaks=1</code>, ran to completion, printed the right answer, and
+<strong>exited 0 with no diagnostic</strong>. LeakSanitizer is not supported on Darwin at all, so
+the option is silently inert rather than failing loudly &mdash; which is worse.</p>
+<p>What works instead is Apple's own <code>leaks</code>, on a plain Apple-clang build:</p>
+<pre><code>MallocStackLogging=1 leaks -atExit -- ./t2
+Process 27743: 1 leak for 48 total leaked bytes.</code></pre>
+<p>and it prints the allocating stack, down to the line. Recorded as
+<a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0005-asan-does-not-detect-leaks-on-macos.md">learning
+record 0005</a>.</p>
+
+<h2>Worked through</h2>
+<p><a href="../lessons/0004-why-cmake-exists.html">Lesson 4 &mdash; CMake Is Not a Build
+System</a>.</p>
+</div>
+</body>
+</html>

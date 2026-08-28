@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reference — How a Vector Works Inside</title>
+<meta name="description" content="How a vector works inside: size versus capacity, growth, reallocation, and iterator invalidation.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<style>
+  body { max-width: 46rem; padding-top: 2.5rem; font-size: 1rem; }
+  h2 { margin-top: 2rem; }
+  h3 { font-size: 1.05rem; font-weight: normal; font-style: italic;
+       color: var(--ink-soft); margin: 1.8rem 0 0.4rem; }
+  table { font-size: 0.83rem; }
+  pre { font-size: 0.78rem; }
+  .lede { font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.1em;
+          text-transform: uppercase; color: var(--accent); }
+</style>
+</head>
+<body>
+
+<p class="kicker">Reference sheet &middot; C++ Tutorial &middot; Project 1</p>
+<h1>How a Vector Works Inside</h1>
+<p class="standfirst">A growable array is three numbers and an address. Everything else &mdash;
+<code>new</code>, <code>delete[]</code>, doubling, the leak &mdash; is bookkeeping to keep those
+three honest. This sheet explains every line of <code>containers/vector.hpp</code> and what to say
+when you are asked to defend it.</p>
+
+<h2>1. The whole idea, in one picture</h2>
+
+<p>A <code>Vector</code> is not a magic growable thing. It is a small object holding three pieces of
+state, one of which is the <em>address</em> of a block of memory somewhere else.</p>
+
+<figure>
+<svg viewBox="0 0 620 220" role="img" aria-label="A Vector object with three members, its m_data pointer aimed at a four-slot heap buffer">
+  <text x="8" y="18" class="svg-mono svg-faint" font-size="11">THE VECTOR OBJECT (on the stack, 24 bytes)</text>
+  <rect x="8" y="30" width="215" height="96" class="svg-box" rx="3"/>
+  <text x="20" y="52"  class="svg-mono svg-ink"  font-size="12">m_data</text>
+  <text x="120" y="52" class="svg-mono svg-accent" font-size="12">0x6000…c30</text>
+  <line x1="8" y1="62" x2="223" y2="62" class="svg-rule"/>
+  <text x="20" y="84"  class="svg-mono svg-ink"  font-size="12">m_size</text>
+  <text x="120" y="84" class="svg-mono svg-ink" font-size="12">3</text>
+  <line x1="8" y1="94" x2="223" y2="94" class="svg-rule"/>
+  <text x="20" y="116" class="svg-mono svg-ink"  font-size="12">m_capacity</text>
+  <text x="120" y="116" class="svg-mono svg-ink" font-size="12">4</text>
+
+  <path d="M223 52 C 265 52, 265 66, 305 66" class="svg-stroke" stroke-width="1.5"/>
+  <path d="M299 61 L 307 66 L 299 71 Z" class="svg-accent"/>
+
+  <text x="315" y="18" class="svg-mono svg-faint" font-size="11">THE BUFFER (on the heap)</text>
+  <rect x="315" y="44" width="60" height="44" class="svg-box"/>
+  <rect x="375" y="44" width="60" height="44" class="svg-box"/>
+  <rect x="435" y="44" width="60" height="44" class="svg-box"/>
+  <rect x="495" y="44" width="60" height="44" class="svg-box"/>
+  <text x="336" y="72" class="svg-mono svg-ink" font-size="13">10</text>
+  <text x="396" y="72" class="svg-mono svg-ink" font-size="13">20</text>
+  <text x="456" y="72" class="svg-mono svg-ink" font-size="13">30</text>
+  <text x="519" y="72" class="svg-mono svg-faint" font-size="13">??</text>
+  <text x="341" y="104" class="svg-mono svg-faint" font-size="10">0</text>
+  <text x="401" y="104" class="svg-mono svg-faint" font-size="10">1</text>
+  <text x="461" y="104" class="svg-mono svg-faint" font-size="10">2</text>
+  <text x="521" y="104" class="svg-mono svg-faint" font-size="10">3</text>
+
+  <path d="M315 130 L 495 130" class="svg-stroke" stroke-width="1"/>
+  <path d="M315 126 L 315 134 M495 126 L495 134" class="svg-stroke" stroke-width="1"/>
+  <text x="360" y="148" class="svg-serif svg-soft" font-size="12">m_size = 3 (yours)</text>
+
+  <path d="M315 168 L 555 168" class="svg-stroke" stroke-width="1"/>
+  <path d="M315 164 L 315 172 M555 164 L555 172" class="svg-stroke" stroke-width="1"/>
+  <text x="350" y="186" class="svg-serif svg-soft" font-size="12">m_capacity = 4 (owned)</text>
+
+  <text x="8" y="186" class="svg-serif svg-faint" font-size="11">Slot 3 is allocated but</text>
+  <text x="8" y="202" class="svg-serif svg-faint" font-size="11">not yet written. Reading it</text>
+  <text x="8" y="218" class="svg-serif svg-faint" font-size="11">is a bug, not a zero.</text>
+</svg>
+<figcaption><strong>m_size</strong> is what the caller thinks they have. <strong>m_capacity</strong>
+is what you actually own. The gap between them is free space bought in advance, so that most pushes
+cost nothing but a write.</figcaption>
+</figure>
+
+<p>The invariant &mdash; the sentence that must be true after every single operation &mdash; is
+<code>m_size &lt;= m_capacity</code>. Every bug in this file is a violation of that one line.</p>
+
+<h2>2. Pointers, from zero</h2>
+
+<p>This is the concept with no equivalent in any language you have written before, so it gets its
+own section.</p>
+
+<p>An <code>int</code> holds a number. An <code>int*</code> &mdash; said aloud as <em>pointer to
+int</em> &mdash; holds the <em>address of</em> a number. It is a street address, not a house.</p>
+
+<pre><code>int  x = 42;      // x holds 42
+int* p = &amp;x;      // p holds "where x lives", e.g. 0x16f2ba3c8
+                  // &amp; means "address of"
+
+*p = 99;          // * means "the thing at that address"
+                  // x is now 99, and we never mentioned x</code></pre>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>You write</th><th>It means</th><th>Type</th></tr></thead>
+  <tbody>
+    <tr><td><code>int* p</code></td><td>p is a pointer to an int</td><td>declaration</td></tr>
+    <tr><td><code>&amp;x</code></td><td>the address of x</td><td><code>int*</code></td></tr>
+    <tr><td><code>*p</code></td><td>the int living at address p</td><td><code>int&amp;</code></td></tr>
+    <tr><td><code>p[3]</code></td><td>the int three slots past p</td><td><code>int&amp;</code></td></tr>
+    <tr><td><code>nullptr</code></td><td>an address deliberately pointing at nothing</td><td>any pointer</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p><code>p[3]</code> is the one that matters here. Indexing a pointer is not a special array
+feature &mdash; it is arithmetic. <code>p[3]</code> means "start at p, walk forward three ints,
+give me what is there." The compiler knows an <code>int</code> is four bytes, so it moves twelve.</p>
+
+<div class="aside">
+  <span class="label">Why this is dangerous</span>
+  Nothing checks that slot 3 is yours. <code>p[3]</code> compiles whether the buffer has four slots
+  or one. C++ will happily read whatever bytes are at that address and hand them to you as an
+  <code>int</code>. This is the entire reason AddressSanitizer exists, and section 8 shows it
+  catching exactly this.
+</div>
+
+<h2>3. Why the heap at all</h2>
+
+<p>Local variables live on the <strong>stack</strong>. The compiler decides the layout of a stack
+frame while compiling &mdash; it emits one fixed number for "this function needs 48 bytes." That
+number is baked into the executable before your program has ever run.</p>
+
+<p>So you cannot say "give me room for <code>n</code> ints" when <code>n</code> is not known until
+runtime. There is no compile-time size to bake in. That is the <em>only</em> reason the heap is in
+this file.</p>
+
+<figure>
+<svg viewBox="0 0 620 180" role="img" aria-label="Stack frames with fixed compile-time sizes beside a heap with runtime-sized blocks">
+  <text x="8" y="16" class="svg-mono svg-faint" font-size="11">STACK</text>
+  <rect x="8" y="26" width="230" height="34" class="svg-box"/>
+  <text x="20" y="48" class="svg-mono svg-ink" font-size="11">main()  — 48 bytes</text>
+  <rect x="8" y="60" width="230" height="34" class="svg-box"/>
+  <text x="20" y="82" class="svg-mono svg-ink" font-size="11">push_back()  — 32 bytes</text>
+  <rect x="8" y="94" width="230" height="34" class="svg-box"/>
+  <text x="20" y="116" class="svg-mono svg-ink" font-size="11">grow()  — 32 bytes</text>
+  <text x="8" y="152" class="svg-serif svg-soft" font-size="11">Sizes fixed when you compiled.</text>
+  <text x="8" y="168" class="svg-serif svg-soft" font-size="11">Freed automatically on return.</text>
+
+  <text x="330" y="16" class="svg-mono svg-faint" font-size="11">HEAP</text>
+  <rect x="330" y="26" width="120" height="30" class="svg-box"/>
+  <text x="342" y="46" class="svg-mono svg-ink" font-size="11">new int[1]</text>
+  <rect x="330" y="60" width="160" height="30" class="svg-box"/>
+  <text x="342" y="80" class="svg-mono svg-ink" font-size="11">new int[2]</text>
+  <rect x="330" y="94" width="230" height="30" class="svg-box"/>
+  <text x="342" y="114" class="svg-mono svg-ink" font-size="11">new int[4]</text>
+  <text x="330" y="152" class="svg-serif svg-soft" font-size="11">Sizes decided while running.</text>
+  <text x="330" y="168" class="svg-serif svg-accent" font-size="11">Freed only when you say so.</text>
+</svg>
+<figcaption>The trade is explicit: the heap gives you runtime-sized memory, and takes back the
+automatic cleanup. That missing cleanup is the leak in section 7.</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Allocate</th><th>Free with</th><th>Crossing them</th></tr></thead>
+  <tbody>
+    <tr><td><code>new int</code></td><td><code>delete</code></td><td rowspan="2">Undefined behaviour. Not a warning, not an error &mdash; it may appear to work for months.</td></tr>
+    <tr><td><code>new int[n]</code></td><td><code>delete[]</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p><code>delete[] nullptr</code> is explicitly defined to do nothing. This is why <code>grow()</code>
+does not need to special-case the very first allocation.</p>
+
+<h2>4. <code>push_back</code>, line by line</h2>
+
+<pre><code>void push_back(int value)
+{
+    if (m_size == m_capacity)   // 1. no free slot?
+        grow();                 //    buy more
+
+    m_data[m_size] = value;     // 2. write into the first free slot
+    ++m_size;                   // 3. one push, one increment
+}</code></pre>
+
+<p>On the very first call both members are <code>0</code>, so <code>0 == 0</code> fires and
+<code>grow()</code> allocates the first buffer. There is no separate "initialise" path; the empty
+vector is just the case where capacity has not been bought yet.</p>
+
+<p>Step 2 uses <code>m_size</code> as the index because of the off-by-one that is not an off-by-one:
+if you hold three elements, they occupy slots 0, 1, 2 &mdash; so slot 3, which is
+<code>m_size</code>, is the first free one.</p>
+
+<div class="aside">
+  <span class="label">The bug worth knowing by name</span>
+  Writing <code>m_data[m_size++] = value;</code> <em>and then</em> <code>++m_size;</code> increments
+  twice. <code>m_size++</code> already increments. The count then runs ahead of what is stored, and
+  worse, it steps straight over <code>m_capacity</code> without ever being equal to it &mdash; so
+  <code>if (m_size == m_capacity)</code> is never true again, <code>grow()</code> never runs, and
+  every subsequent push writes past the end of a buffer that was never resized. Use
+  <code>==</code>'s fragility as the lesson: <code>&gt;=</code> would have survived it.
+</div>
+
+<h2>5. <code>grow()</code> &mdash; the only interesting function</h2>
+
+<p>A heap buffer cannot be resized in place. The memory directly after it may already belong to
+something else. So growing means making a second, larger buffer and moving in.</p>
+
+<figure>
+<svg viewBox="0 0 620 250" role="img" aria-label="The four steps of grow: allocate, copy, delete old, adopt new">
+  <text x="8" y="16" class="svg-mono svg-accent" font-size="11">1. ALLOCATE — nothing is copied yet, both buffers exist</text>
+  <text x="8" y="40" class="svg-mono svg-faint" font-size="10">m_data</text>
+  <rect x="60" y="26" width="45" height="24" class="svg-box"/><text x="75" y="43" class="svg-mono svg-ink" font-size="11">10</text>
+  <rect x="105" y="26" width="45" height="24" class="svg-box"/><text x="120" y="43" class="svg-mono svg-ink" font-size="11">20</text>
+  <text x="320" y="40" class="svg-mono svg-faint" font-size="10">fresh</text>
+  <rect x="365" y="26" width="45" height="24" class="svg-box"/><text x="383" y="43" class="svg-mono svg-faint" font-size="11">?</text>
+  <rect x="410" y="26" width="45" height="24" class="svg-box"/><text x="428" y="43" class="svg-mono svg-faint" font-size="11">?</text>
+  <rect x="455" y="26" width="45" height="24" class="svg-box"/><text x="473" y="43" class="svg-mono svg-faint" font-size="11">?</text>
+  <rect x="500" y="26" width="45" height="24" class="svg-box"/><text x="518" y="43" class="svg-mono svg-faint" font-size="11">?</text>
+
+  <text x="8" y="88" class="svg-mono svg-accent" font-size="11">2. COPY — m_size values move across</text>
+  <rect x="60" y="98" width="45" height="24" class="svg-box"/><text x="75" y="115" class="svg-mono svg-ink" font-size="11">10</text>
+  <rect x="105" y="98" width="45" height="24" class="svg-box"/><text x="120" y="115" class="svg-mono svg-ink" font-size="11">20</text>
+  <path d="M155 110 L 358 110" class="svg-stroke" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <path d="M352 105 L 360 110 L 352 115 Z" class="svg-accent"/>
+  <rect x="365" y="98" width="45" height="24" class="svg-box"/><text x="380" y="115" class="svg-mono svg-ink" font-size="11">10</text>
+  <rect x="410" y="98" width="45" height="24" class="svg-box"/><text x="425" y="115" class="svg-mono svg-ink" font-size="11">20</text>
+  <rect x="455" y="98" width="45" height="24" class="svg-box"/><text x="473" y="115" class="svg-mono svg-faint" font-size="11">?</text>
+  <rect x="500" y="98" width="45" height="24" class="svg-box"/><text x="518" y="115" class="svg-mono svg-faint" font-size="11">?</text>
+
+  <text x="8" y="160" class="svg-mono svg-accent" font-size="11">3. DELETE[] the old buffer — only now is it safe</text>
+  <rect x="60" y="170" width="90" height="24" class="svg-box" stroke-dasharray="4 3"/>
+  <text x="72" y="187" class="svg-mono svg-faint" font-size="10">returned</text>
+  <rect x="365" y="170" width="45" height="24" class="svg-box"/><text x="380" y="187" class="svg-mono svg-ink" font-size="11">10</text>
+  <rect x="410" y="170" width="45" height="24" class="svg-box"/><text x="425" y="187" class="svg-mono svg-ink" font-size="11">20</text>
+  <rect x="455" y="170" width="45" height="24" class="svg-box"/><text x="473" y="187" class="svg-mono svg-faint" font-size="11">?</text>
+  <rect x="500" y="170" width="45" height="24" class="svg-box"/><text x="518" y="187" class="svg-mono svg-faint" font-size="11">?</text>
+
+  <text x="8" y="228" class="svg-mono svg-accent" font-size="11">4. ADOPT — m_data and m_capacity now describe the new buffer</text>
+  <text x="8" y="246" class="svg-mono svg-soft" font-size="11">m_data</text>
+  <path d="M60 242 L 358 242" class="svg-stroke" stroke-width="1.5"/>
+  <path d="M352 237 L 360 242 L 352 247 Z" class="svg-accent"/>
+  <text x="370" y="246" class="svg-mono svg-soft" font-size="11">m_capacity = 4</text>
+</svg>
+<figcaption>The order is the whole function. Do step 3 before step 2 and you copy out of memory you
+have already given back &mdash; it compiles, and it frequently prints the right answer anyway,
+which is what makes it hard to find.</figcaption>
+</figure>
+
+<pre><code>void grow()
+{
+    std::size_t new_capacity = (m_capacity == 0) ? 1 : m_capacity * 2;
+
+    int *fresh = new int[new_capacity];         // 1. bigger buffer
+
+    for (std::size_t i = 0; i &lt; m_size; ++i)    // 2. copy the old values
+        fresh[i] = m_data[i];                   //    m_size, not m_capacity
+
+    delete[] m_data;                            // 3. release the old buffer
+    m_data = fresh;                             // 4. adopt the new one
+    m_capacity = new_capacity;
+}</code></pre>
+
+<p>Two details worth defending out loud:</p>
+
+<ul>
+  <li>The loop runs to <code>m_size</code>, not <code>m_capacity</code>. Slots between the two have
+  never been written; copying them would read uninitialised memory for no benefit.</li>
+  <li><code>m_capacity == 0</code> is special-cased because doubling zero is still zero. Without it
+  the first <code>grow()</code> allocates a zero-length buffer and the next write is out of
+  bounds.</li>
+</ul>
+
+<h2>6. Why doubling, and not <code>+1</code></h2>
+
+<p>This is the design question you will be asked. The answer is a real reason, not a convention.</p>
+
+<p>Copying is the expensive part of <code>grow()</code>. If capacity grew by one each time, every
+single push would reallocate and copy everything &mdash; <em>n</em> pushes would cost
+1&nbsp;+&nbsp;2&nbsp;+&nbsp;&hellip;&nbsp;+&nbsp;<em>n</em> copies, which is
+<em>n</em>&sup2;/2. Doubling makes the reallocations rare and geometric: the total copying across
+<em>n</em> pushes is <em>n</em>&nbsp;+&nbsp;<em>n</em>/2&nbsp;+&nbsp;<em>n</em>/4&nbsp;+&nbsp;&hellip;
+which sums to less than 2<em>n</em>.</p>
+
+<p>So a push is not constant time &mdash; occasionally it is very expensive &mdash; but the
+<em>average</em> over any run of pushes is constant. The name for that is
+<strong>amortised constant time</strong>, and it is the phrase to use.</p>
+
+<h3>The trace, verified on this machine</h3>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Push</th><th>Capacity full?</th><th>grow() runs</th><th>New capacity</th><th>Ints copied</th><th>Output line</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>0 == 0 yes</td><td>yes</td><td>1</td><td>0</td><td><code>size 1  cap 1</code></td></tr>
+    <tr><td>2</td><td>1 == 1 yes</td><td>yes</td><td>2</td><td>1</td><td><code>size 2  cap 2</code></td></tr>
+    <tr><td>3</td><td>2 == 2 yes</td><td>yes</td><td>4</td><td>2</td><td><code>size 3  cap 4</code></td></tr>
+    <tr><td>4</td><td>3 != 4 no</td><td><strong>no</strong></td><td>4</td><td>0</td><td><code>size 4  cap 4</code></td></tr>
+    <tr><td>5</td><td>4 == 4 yes</td><td>yes</td><td>8</td><td>4</td><td><code>size 5  cap 8</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Push 4 is the doubling paying off: it costs one write and nothing else. If your capacity column
+does not match this, your growth rule is not the one you think you wrote.</p>
+
+<h2>7. The leak you have deliberately left in</h2>
+
+<p>Nothing in the class ever calls <code>delete[]</code> on the <em>final</em> buffer.
+<code>grow()</code> frees each old buffer as it replaces it, so the intermediate ones are fine. But
+when <code>v</code> goes out of scope, its three members simply vanish &mdash; including
+<code>m_data</code>, which was the only record of where the last buffer lived.</p>
+
+<figure>
+<svg viewBox="0 0 620 130" role="img" aria-label="After the Vector object is destroyed, the heap buffer remains allocated with nothing pointing at it">
+  <rect x="8" y="20" width="200" height="70" class="svg-box" rx="3" stroke-dasharray="5 4"/>
+  <text x="26" y="48" class="svg-mono svg-faint" font-size="11">m_data     (gone)</text>
+  <text x="26" y="70" class="svg-mono svg-faint" font-size="11">m_size     (gone)</text>
+  <text x="26" y="88" class="svg-mono svg-faint" font-size="11">m_capacity (gone)</text>
+  <text x="8" y="112" class="svg-serif svg-faint" font-size="11">Stack frame popped on scope exit.</text>
+
+  <text x="255" y="58" class="svg-mono svg-accent" font-size="22">✗</text>
+
+  <rect x="315" y="30" width="55" height="34" class="svg-box"/>
+  <rect x="370" y="30" width="55" height="34" class="svg-box"/>
+  <rect x="425" y="30" width="55" height="34" class="svg-box"/>
+  <rect x="480" y="30" width="55" height="34" class="svg-box"/>
+  <text x="335" y="52" class="svg-mono svg-ink" font-size="11">10</text>
+  <text x="390" y="52" class="svg-mono svg-ink" font-size="11">20</text>
+  <text x="445" y="52" class="svg-mono svg-ink" font-size="11">30</text>
+  <text x="500" y="52" class="svg-mono svg-ink" font-size="11">40</text>
+  <text x="315" y="88" class="svg-serif svg-accent" font-size="11">Still allocated. Nothing points here.</text>
+  <text x="315" y="106" class="svg-serif svg-accent" font-size="11">Cannot be freed. Cannot be reached.</text>
+  <text x="315" y="124" class="svg-serif svg-faint" font-size="11">48 bytes, until the process exits.</text>
+</svg>
+<figcaption>That is the definition of a leak: memory still allocated with no surviving way to
+address it. The fix is a destructor, which is Lesson 6.</figcaption>
+</figure>
+
+<p>The one-line fix, for when you get there:</p>
+
+<pre><code>~Vector() { delete[] m_data; }</code></pre>
+
+<p>A destructor runs automatically when the object goes out of scope. Tying the lifetime of a heap
+resource to the lifetime of a stack object is the idea called <strong>RAII</strong>, and it is the
+single most important pattern in the language. <code>Buffer</code> in
+<code>containers/vec.hpp</code> already does exactly this &mdash; compare the two files and the
+difference is that one line.</p>
+
+<div class="aside">
+  <span class="label">Do not stop there</span>
+  Adding a destructor alone makes things <em>worse</em> in one specific way: copying the vector then
+  gives two objects holding the same pointer, and both will free it &mdash; a double free. That is
+  why the destructor comes bundled with the copy constructor and copy assignment as a set, known as
+  the <strong>Rule of Three</strong>. Knowing that this is coming is worth saying in review.
+</div>
+
+<h2>8. Which tool finds which bug</h2>
+
+<p>This matters more than it looks, because <strong>both of your presets are blind to leaks, for
+two unrelated reasons.</strong></p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Bug</th><th><code>dev</code> preset</th><th><code>asan</code> preset</th><th><code>leaks</code></th></tr></thead>
+  <tbody>
+    <tr><td>Read past the end</td><td>no</td><td><strong>yes</strong></td><td>no</td></tr>
+    <tr><td>Use after free</td><td>no</td><td><strong>yes</strong></td><td>no</td></tr>
+    <tr><td>Signed overflow, bad shifts</td><td><strong>yes</strong></td><td><strong>yes</strong></td><td>no</td></tr>
+    <tr><td>Leak</td><td>no &mdash; UBSan suppresses it</td><td>no &mdash; unsupported on macOS</td><td><strong>yes</strong>, plain build only</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>The leak, on an uninstrumented build</h3>
+
+<p>LeakSanitizer does not exist on Darwin, so the <code>asan</code> preset is silent. And
+<code>-fsanitize=undefined</code> in the <code>dev</code> preset makes Apple's <code>leaks</code>
+report zero as well &mdash; verified by holding the source constant and varying only that one flag.
+Leak checking therefore needs a third, plain build:</p>
+
+<pre><code>$ /usr/bin/clang++ -std=c++20 -g -Iinclude tests/main.cpp -o /tmp/leakcheck
+$ MallocStackLogging=1 leaks -atExit -- /tmp/leakcheck
+
+Process 47373: 1 leak for 48 total leaked bytes.
+
+STACK OF 1 INSTANCE OF 'ROOT LEAK: &lt;malloc in containers::Vector::grow()&gt;':
+5   leakcheck   main + 72                                 main.cpp:8
+4   leakcheck   containers::Vector::push_back(int) + 56   vector.hpp:28
+3   leakcheck   containers::Vector::grow() + 104          vector.hpp:66
+2   libc++abi   operator new(unsigned long) + 52</code></pre>
+
+<p>48 bytes is the 8-slot buffer, four bytes per <code>int</code>, plus allocator overhead. Read the
+stack bottom-up and it is the whole call chain: <code>main</code> called <code>push_back</code>,
+which called <code>grow</code>, which called <code>new[]</code>. The leak is blamed on
+<code>grow</code> because that is the <em>allocation</em> site. Leak tools always report it that
+way &mdash; the <code>delete[]</code> you forgot has no location.</p>
+
+<h3>The overflow, on the <code>asan</code> preset</h3>
+
+<p>Change <code>v[3]</code> to <code>v[10]</code> when size is 5, and:</p>
+
+<pre><code>==47442==ERROR: AddressSanitizer: heap-buffer-overflow
+READ of size 4 at 0x603000001c58 thread T0
+    #0 in main oob.cpp:6
+
+0x603000001c58 is located 8 bytes after 32-byte region [0x603000001c30,0x603000001c50)
+allocated by thread T0 here:
+    #1 in containers::Vector::grow()          vector.hpp:66
+    #2 in containers::Vector::push_back(int)  vector.hpp:28</code></pre>
+
+<p>Note what it gives you that a crash would not: the exact byte, how far past the region it was,
+how large the region is, and where that region was allocated. Two tools, two classes of bug, two
+completely different reports.</p>
+
+<h2>9. Defending it in review</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>If asked</th><th>Say</th></tr></thead>
+  <tbody>
+    <tr><td>Why doubling?</td><td>Copying dominates. Doubling makes total copying across n pushes sum to under 2n, so pushes are amortised constant. Growing by a constant would make it quadratic.</td></tr>
+    <tr><td>Why is the copy loop bounded by <code>m_size</code>?</td><td>Slots between size and capacity have never been written. Copying them would read uninitialised memory to no benefit.</td></tr>
+    <tr><td>Why <code>delete[]</code> after the copy, not before?</td><td>Freeing first means the copy reads memory already returned to the allocator. It usually still prints correct output, which is what makes it dangerous.</td></tr>
+    <tr><td>Why no bounds check in <code>operator[]</code>?</td><td>Matching <code>std::vector</code>, which does not check either; <code>at()</code> is the checked one. The unchecked read is caught by ASan instead, and I have the report.</td></tr>
+    <tr><td>Why does it leak?</td><td>Deliberately, for now. No destructor, so the final buffer is never freed. I can show the 48-byte report. The fix is a destructor plus the rest of the Rule of Three, which is next.</td></tr>
+    <tr><td>Is it clean under the sanitizers?</td><td>Clean under both presets &mdash; but that claim is weaker than it sounds, because neither preset detects leaks. That needs a third plain build and <code>leaks</code>.</td></tr>
+    <tr><td>What is still missing for P1?</td><td>Templates (<code>Vector&lt;T&gt;</code> rather than int), copy and move semantics, iterators, and <code>unordered_map</code>.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="source">
+  <span class="label">Related</span>
+  <p>Lesson: <a href="../lessons/0005-the-heap-and-your-first-vector.html">05 &mdash; The Heap and
+  Your First Vector</a>. Records:
+  <a href="../learning-records/0005-asan-does-not-detect-leaks-on-macos.md">0005</a> (ASan finds no
+  leaks on macOS) and
+  <a href="../learning-records/0006-ubsan-instrumentation-hides-leaks-from-leaks.md">0006</a>
+  (UBSan suppresses <code>leaks</code> too). Toolchain:
+  <a href="./toolchain.html">Build Pipeline &amp; Error Triage</a>.</p>
+</div>
+
+</body>
+</html>

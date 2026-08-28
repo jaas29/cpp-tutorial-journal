@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 2 — Two Builds, One Source Tree</title>
+<meta name="description" content="Why one source tree needs both a debug and a release build, and how to keep the two from fighting.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<link rel="stylesheet" href="../assets/quiz.css">
+</head>
+<body>
+
+<p class="kicker">Lesson 02 &middot; Project 1, week 1 &middot; C++ Tutorial</p>
+<h1>Two Builds, One Source Tree</h1>
+<p class="standfirst">In <a href="./0001-four-programs-not-one.html">Lesson 1</a> you typed the
+pipeline by hand. Today you hand that typing to CMake — and get something you could not get by
+hand: the same source compiled two different ways, by two different compilers, at the same time.
+By the end you have the repository you will build Project 1 in.</p>
+
+<h2><span class="num">Why this, now</span>You need two compilers, not one</h2>
+
+<p>Project 1's success criterion is <em>"runs clean under AddressSanitizer and UBSan."</em> On this
+machine that criterion is not reachable with one compiler. Apple clang's AddressSanitizer
+<strong>hangs on startup</strong> under macOS 26 — it compiles, it links, and then it sits there
+forever producing nothing. UBSan is fine; ASan is not
+(<a href="../learning-records/0001-asan-broken-under-apple-clang.md">learning record 0001</a> has
+the deadlock trace).</p>
+
+<p>So you need Homebrew's clang for sanitizer runs and Apple clang for everything else. Doing that
+by hand means two different long command lines that you must not mix up, and two sets of
+<code>.o</code> files that must never land in the same directory. That is exactly the kind of
+bookkeeping you should never do with your fingers.</p>
+
+<div class="aside">
+  <span class="label">Mission link</span>
+  This is week-1 infrastructure for the container library. Every lesson from here on assumes
+  <code>cmake --build --preset asan</code> works, because from Project 1 onward the sanitizer run
+  <em>is</em> the test.
+</div>
+
+<h2><span class="num">Knowledge</span>CMake does not compile anything</h2>
+
+<p>The single most useful thing to know: <strong>CMake is not a compiler and not a build system.
+It is a generator.</strong> It reads your <code>CMakeLists.txt</code> and writes out the input
+files for a real build tool, which then runs the four programs from Lesson 1.</p>
+
+<p>That is why there are always two steps, never one:</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Step</th><th>Command</th><th>What happens</th><th>How often</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Configure</strong></td>
+      <td><code>cmake --preset dev</code></td>
+      <td>Finds the compiler, tests what it supports, writes build files into a build directory.</td>
+      <td>Once — and again when you edit <code>CMakeLists.txt</code>.</td>
+    </tr>
+    <tr>
+      <td><strong>Build</strong></td>
+      <td><code>cmake --build --preset dev</code></td>
+      <td>Runs the generated build tool, which runs <code>clang++ -c</code> and then links.</td>
+      <td>Every time you change code.</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<figure>
+<svg viewBox="0 0 620 210" role="img" aria-labelledby="cm-title">
+  <title id="cm-title">One CMakeLists generates two independent build directories, each running its own compiler</title>
+  <defs>
+    <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,1 L9,5 L0,9" class="svg-stroke" stroke-width="1.4"/>
+    </marker>
+  </defs>
+
+  <g class="svg-accent svg-mono" font-size="9" letter-spacing="1" text-anchor="middle">
+    <text x="72" y="14">YOU WRITE</text>
+    <text x="300" y="14">CONFIGURE</text>
+    <text x="530" y="14">BUILD</text>
+  </g>
+
+  <rect x="12" y="76" width="120" height="52" rx="2" class="svg-box"/>
+  <text x="72" y="97" class="svg-ink svg-mono" font-size="9.5" text-anchor="middle">CMakeLists.txt</text>
+  <text x="72" y="112" class="svg-ink svg-mono" font-size="9.5" text-anchor="middle">CMakePresets.json</text>
+
+  <rect x="212" y="34" width="176" height="52" rx="2" class="svg-box"/>
+  <text x="300" y="55" class="svg-ink svg-mono" font-size="9.5" text-anchor="middle">build/dev/</text>
+  <text x="300" y="70" class="svg-faint svg-serif" font-size="9" font-style="italic" text-anchor="middle">Apple clang &middot; UBSan</text>
+
+  <rect x="212" y="120" width="176" height="52" rx="2" class="svg-box"/>
+  <text x="300" y="141" class="svg-ink svg-mono" font-size="9.5" text-anchor="middle">build/asan/</text>
+  <text x="300" y="156" class="svg-faint svg-serif" font-size="9" font-style="italic" text-anchor="middle">Homebrew clang &middot; ASan+UBSan</text>
+
+  <rect x="468" y="34" width="140" height="52" rx="2" class="svg-box"/>
+  <text x="538" y="55" class="svg-ink svg-mono" font-size="9.5" text-anchor="middle">./build/dev/tests</text>
+  <text x="538" y="70" class="svg-faint svg-serif" font-size="9" font-style="italic" text-anchor="middle">fast, everyday</text>
+
+  <rect x="468" y="120" width="140" height="52" rx="2" class="svg-box"/>
+  <text x="538" y="141" class="svg-ink svg-mono" font-size="9.5" text-anchor="middle">./build/asan/tests</text>
+  <text x="538" y="156" class="svg-faint svg-serif" font-size="9" font-style="italic" text-anchor="middle">slow, catches bugs</text>
+
+  <g class="svg-stroke" stroke-width="1.2" marker-end="url(#ah2)">
+    <path d="M132,95 C170,95 172,60 206,60"/>
+    <path d="M132,109 C170,109 172,146 206,146"/>
+    <path d="M388,60 L462,60"/>
+    <path d="M388,146 L462,146"/>
+  </g>
+
+  <g class="svg-faint svg-serif" font-size="9.5" font-style="italic" text-anchor="middle">
+    <text x="72" y="196">one source tree</text>
+    <text x="300" y="196">two build dirs, never mixed</text>
+    <text x="538" y="196">two executables</text>
+  </g>
+</svg>
+<figcaption>Your <code>.cpp</code> files are written once. Everything downstream of them exists
+twice, in separate directories, which is what makes two compilers safe.</figcaption>
+</figure>
+
+<h3>Out-of-source builds</h3>
+
+<p>Every generated file — object files, executables, CMake's own cache — goes into a
+<code>build/</code> directory that is <strong>not</strong> under version control. Nothing generated
+ever sits next to your source. Two consequences worth internalising:</p>
+
+<ul>
+  <li>Deleting <code>build/</code> can never lose work. When a build goes strange, deleting it is
+  the correct first move, not a desperate one.</li>
+  <li>Two build directories means two complete, independent sets of object files. The Apple-clang
+  <code>.o</code> files and the Homebrew-clang <code>.o</code> files can never accidentally be
+  linked together.</li>
+</ul>
+
+<h3>Targets, and why every command starts with <code>target_</code></h3>
+
+<p>Modern CMake is built around <strong>targets</strong>: named things you build (a library, an
+executable). You never set flags globally. You attach properties to a target, and targets that
+link against it inherit those properties automatically. That inheritance is the whole design
+(<a href="https://cmake.org/cmake/help/latest/guide/tutorial/index.html">official CMake
+tutorial</a>).</p>
+
+<p>Three keywords control how far a property spreads:</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Keyword</th><th>Applies to the target itself</th><th>Spreads to whoever links it</th></tr></thead>
+  <tbody>
+    <tr><td><code>PRIVATE</code></td><td>yes</td><td>no</td></tr>
+    <tr><td><code>PUBLIC</code></td><td>yes</td><td>yes</td></tr>
+    <tr><td><code>INTERFACE</code></td><td>no</td><td>yes</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Your container library will be <em>templates</em>, which means it lives entirely in headers and
+has no <code>.cpp</code> of its own to compile. CMake has a name for that shape: an
+<code>INTERFACE</code> library. It compiles nothing. It is a named bundle of include paths and
+flags that gets handed to anything linking it.</p>
+
+<h2><span class="num">Skill</span>Build the Project 1 repository</h2>
+
+<p>Do this in <code>~/Projects/</code>, per your workspace convention — never in this teaching
+workspace.</p>
+
+<ol class="steps">
+
+<li>
+<p><strong>Make the tree.</strong></p>
+<pre><code>mkdir -p ~/Projects/p1-containers/{include/containers,tests}
+cd ~/Projects/p1-containers
+git init
+</code></pre>
+</li>
+
+<li>
+<p><strong>Write <code>CMakeLists.txt</code>.</strong> Six meaningful lines of setup, then two
+targets.</p>
+<p class="filename">CMakeLists.txt</p>
+<pre><code>cmake_minimum_required(VERSION 3.28)
+project(containers LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)   # error out rather than silently downgrade
+set(CMAKE_CXX_EXTENSIONS OFF)         # -std=c++20, not -std=gnu++20
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # so your editor knows your flags
+
+add_library(containers INTERFACE)
+target_include_directories(containers INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_options(containers INTERFACE -Wall -Wextra -Wpedantic -Werror)
+
+add_executable(tests tests/main.cpp)
+target_link_libraries(tests PRIVATE containers)
+</code></pre>
+<p>The last line is the one doing real work. <code>tests</code> links <code>containers</code>, so
+it inherits both the include path and the warning flags. You never repeat them.</p>
+</li>
+
+<li>
+<p><strong>Write the two source files.</strong> A deliberately tiny stand-in for the real
+<code>vector</code>, so today's lesson stays about the build.</p>
+<p class="filename">include/containers/vec.hpp</p>
+<pre><code>#pragma once
+#include &lt;cstddef&gt;
+
+namespace containers {
+
+class Buffer {
+public:
+    explicit Buffer(std::size_t n) : data_(new int[n]), size_(n) {}
+    ~Buffer() { delete[] data_; }
+
+    int&amp; operator[](std::size_t i) { return data_[i]; }
+    std::size_t size() const { return size_; }
+
+private:
+    int* data_;
+    std::size_t size_;
+};
+
+}  // namespace containers
+</code></pre>
+<p class="filename">tests/main.cpp</p>
+<pre><code>#include &lt;containers/vec.hpp&gt;
+#include &lt;iostream&gt;
+
+int main() {
+    containers::Buffer b(4);
+    for (std::size_t i = 0; i &lt; b.size(); ++i) b[i] = static_cast&lt;int&gt;(i * i);
+    std::cout &lt;&lt; b[3] &lt;&lt; '\n';
+}
+</code></pre>
+<p>Note <code>#include &lt;containers/vec.hpp&gt;</code> with angle brackets, not quotes. It works
+because <code>target_include_directories</code> put <code>include/</code> on the search path — the
+same mechanism <code>&lt;iostream&gt;</code> uses. Your library is now found the way a real
+library is.</p>
+</li>
+
+<li>
+<p><strong>Write <code>CMakePresets.json</code>.</strong> This is the file that saves you from
+memorising two compiler paths and two flag sets.</p>
+<p class="filename">CMakePresets.json</p>
+<pre><code>{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "dev",
+      "displayName": "Everyday build (Apple clang, UBSan)",
+      "binaryDir": "${sourceDir}/build/dev",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
+        "CMAKE_CXX_FLAGS": "-g -fno-omit-frame-pointer -fsanitize=undefined"
+      }
+    },
+    {
+      "name": "asan",
+      "displayName": "Sanitizer build (Homebrew clang, ASan + UBSan)",
+      "binaryDir": "${sourceDir}/build/asan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_COMPILER": "/opt/homebrew/opt/llvm/bin/clang++",
+        "CMAKE_CXX_FLAGS": "-g -fno-omit-frame-pointer -fsanitize=address,undefined -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev",  "configurePreset": "dev" },
+    { "name": "asan", "configurePreset": "asan" }
+  ]
+}
+</code></pre>
+<p>That <code>-isysroot</code> is not optional. Homebrew clang does not know where Xcode keeps the
+system headers, and without it the build dies inside <code>&lt;iostream&gt;</code>. JSON cannot run
+commands, so the path is written out literally — regenerate it with
+<code>xcrun --show-sdk-path</code> if you ever update Xcode.</p>
+</li>
+
+<li>
+<p><strong>Configure and build both.</strong></p>
+<pre><code>cmake --preset dev   &amp;&amp; cmake --build --preset dev
+cmake --preset asan  &amp;&amp; cmake --build --preset asan
+</code></pre>
+<pre><code>[ 50%] Building CXX object CMakeFiles/tests.dir/tests/main.cpp.o
+[100%] Linking CXX executable tests
+[100%] Built target tests
+</code></pre>
+<p>Those two lines are <code>clang++ -c</code> and then the link step — the exact commands you
+typed by hand in Lesson 1, now typed for you. Run both:</p>
+<pre><code>./build/dev/tests     # 9
+./build/asan/tests    # 9
+</code></pre>
+</li>
+
+<li>
+<p><strong>Add a <code>.gitignore</code>, then commit.</strong></p>
+<pre><code>echo "build/" &gt; .gitignore
+git add -A &amp;&amp; git commit -m "Build system: two presets, warnings as errors"
+</code></pre>
+</li>
+
+</ol>
+
+<h3>Now see what the second build buys you</h3>
+
+<p>Introduce a classic off-by-one. In <code>tests/main.cpp</code>, change <code>i &lt; b.size()</code>
+to <code>i &lt;= b.size()</code> — one character. Then build and run both.</p>
+
+<p><strong>The everyday build:</strong></p>
+<pre><code>cmake --build --preset dev &amp;&amp; ./build/dev/tests
+9
+</code></pre>
+
+<p>Exit code 0. It writes one <code>int</code> past the end of a heap allocation and reports
+nothing. That is undefined behaviour running silently, which is the single most dangerous state a
+C++ program can be in.</p>
+
+<p><strong>The sanitizer build, same source:</strong></p>
+<pre><code>cmake --build --preset asan &amp;&amp; ./build/asan/tests
+</code></pre>
+<pre><code>==58506==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x602000000100
+WRITE of size 4 at 0x602000000100 thread T0
+    #0 0x000104c49534 in main main.cpp:6
+
+0x602000000100 is located 0 bytes after 16-byte region [0x6020000000f0,0x602000000100)
+allocated by thread T0 here:
+    #0 0x0001053d11f8 in _Znam  (libclang_rt.asan_osx_dynamic.dylib)
+    #1 0x000104c49d1c in containers::Buffer::Buffer(unsigned long) vec.hpp:9
+    #2 0x000104c49444 in main main.cpp:5
+
+SUMMARY: AddressSanitizer: heap-buffer-overflow main.cpp:6 in main
+</code></pre>
+
+<p>Read what it gave you, because this is the report format you will live inside for the next four
+weeks:</p>
+<ul>
+  <li><strong>What kind of bug</strong> — <code>heap-buffer-overflow</code>, and a
+  <code>WRITE</code> not a read.</li>
+  <li><strong>Where it happened</strong> — <code>main.cpp:6</code>.</li>
+  <li><strong>How far out of bounds</strong> — <em>0 bytes after</em> a 16-byte region. One
+  element past the end of four <code>int</code>s.</li>
+  <li><strong>Where the memory came from</strong> — a second stack trace pointing at
+  <code>vec.hpp:9</code>, your constructor.</li>
+</ul>
+
+<p>Both stack traces at once is the thing to appreciate. The bug is in the test; the allocation is
+in the library; ASan hands you both ends. Put the <code>&lt;</code> back before moving on.</p>
+
+<div class="aside">
+  <span class="label">Also verify</span>
+  Prove <code>-Werror</code> is armed: add <code>int unused = 7;</code> to <code>main</code> and
+  build. You should get <code>error: unused variable 'unused' [-Werror,-Wunused-variable]</code>
+  and no executable. A warning you can ignore is a warning you will ignore, so the project refuses
+  to build with any.
+</div>
+
+<h2><span class="num">Check</span>Retrieval</h2>
+
+<div class="quiz" data-quiz data-title="Build system triage">
+<ol class="quiz-items">
+
+  <li class="quiz-q" data-answer="2"
+      data-explain="CMake generates build files; it never compiles. Configure runs once and writes the build directory, build runs the generated tool which invokes the compiler. Editing a <code>.cpp</code> only needs the build step.">
+    <p class="quiz-prompt">You edit <code>vec.hpp</code>. Which command do you run?</p>
+    <ul class="quiz-options">
+      <li>Configure, then build the preset</li>
+      <li>Only build the preset</li>
+      <li>Delete the build directory first</li>
+    </ul>
+  </li>
+
+  <li class="quiz-q" data-answer="1"
+      data-explain="Configure reads <code>CMakeLists.txt</code>. A new target, flag, or source file listed there does not exist until CMake regenerates the build files. Editing source alone never needs it.">
+    <p class="quiz-prompt">You add a new target to <code>CMakeLists.txt</code>. What must happen?</p>
+    <ul class="quiz-options">
+      <li>Configure must run again</li>
+      <li>Nothing changes, just build</li>
+      <li>Both presets must be deleted</li>
+    </ul>
+  </li>
+
+  <li class="quiz-q" data-answer="3"
+      data-explain="<code>INTERFACE</code> means the property does not apply to the target itself, only to whoever links it. That is the only sensible choice for a header-only library, which compiles nothing of its own.">
+    <p class="quiz-prompt">Your header-only library sets a warning flag. Which keyword?</p>
+    <ul class="quiz-options">
+      <li>PRIVATE, kept to itself</li>
+      <li>PUBLIC, both directions</li>
+      <li>INTERFACE, consumers only</li>
+    </ul>
+  </li>
+
+  <li class="quiz-q" data-answer="2"
+      data-explain="ASan is a runtime tool. It instruments the code the compiler emits and checks every memory access as the program executes, so a line that never runs is never checked. Only the compiler front end reads code it does not run.">
+    <p class="quiz-prompt">Your ASan build passes clean. What has been proven?</p>
+    <ul class="quiz-options">
+      <li>The whole program is memory safe</li>
+      <li>The paths executed were memory safe</li>
+      <li>Every allocation was correctly freed</li>
+    </ul>
+  </li>
+
+</ol>
+</div>
+
+<div class="recall" data-recall>
+  <p class="recall-front"><strong>Say it out loud before revealing.</strong> Why does this project
+  need two build directories rather than two sets of flags in one?</p>
+  <p class="recall-back">Because a build directory holds compiled object files, and these two
+  builds use different compilers with different sanitizer runtimes. Object files from Apple clang
+  and Homebrew clang must never be linked together, and CMake caches the compiler choice per build
+  directory — a directory is configured for one compiler and cannot be re-pointed at another
+  without wiping it. Separate directories make mixing them structurally impossible rather than
+  merely unlikely.</p>
+</div>
+
+<h2><span class="num">Next</span>Where to go from here</h2>
+
+<div class="source">
+  <span class="label">Primary source — read before the next lesson</span>
+  <p><a href="https://cmake.org/cmake/help/latest/guide/tutorial/index.html">The official CMake
+  Tutorial</a>, Steps 1–3 only (about 25 minutes). It is written by the people who maintain CMake
+  and it teaches the target-based style you just used. Stop after Step 3; the later steps are about
+  packaging and installation, which you do not need this term.</p>
+  <p>Keep <a href="https://cmake.org/cmake/help/latest/manual/cmake-commands.7.html">the command
+  reference</a> open rather than reading it. When you need <code>target_compile_definitions</code>
+  or similar, look it up — it is a dictionary, like cppreference.</p>
+</div>
+
+<p>Keep next to you while coding:
+<a href="../reference/cmake.html">Reference — CMake &amp; Sanitizer Builds</a>,
+<a href="../reference/toolchain.html">Reference — The Build Pipeline &amp; Error Triage</a>, and the
+<a href="../reference/glossary.html">Glossary</a>.</p>
+
+<p><strong>Lesson 3</strong> puts a test framework behind <code>ctest</code>, so
+<code>Buffer</code> can be replaced by the real <code>vector</code> with something to hold it to
+account. After that, Project 1 proper: <code>size</code>, <code>capacity</code>, and the growth
+strategy.</p>
+
+<footer>
+  <p class="ask"><strong>Ask me things.</strong> <code>PUBLIC</code> versus <code>INTERFACE</code>,
+  what <code>CMAKE_BUILD_TYPE</code> actually changes, why <code>Buffer</code> uses raw
+  <code>new[]</code> when your mission bans it as a default, or any configure error you hit — say
+  so and we will go into it.</p>
+  <p>Lesson 02 &middot; <em>Two Builds, One Source Tree</em> &middot; C++ Tutorial, Fall 2026
+  &middot; verified against CMake 4.4.2, Apple clang 17.0.0 and Homebrew clang 22.1.8, arm64,
+  <code>-std=c++20</code></p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>
