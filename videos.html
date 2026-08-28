@@ -33,14 +33,76 @@ am the one doing manual memory, and not to be carried into Projects 2 and 3.</p>
 </div>
 
 <h2>Watched</h2>
+<p>Fifteen of The Cherno's C++ series so far, videos 1&ndash;17 of the playlist, over four sessions.
+Two in that range I started and did not finish (<em>CONDITIONS and BRANCHES</em>, <em>BEST Visual
+Studio Setup</em>), so they are not listed.</p>
 <div class="table-wrap">
 <table>
 <thead>
-<tr><th>Date</th><th>Video</th><th>Channel</th><th>What it was for</th></tr>
+<tr><th>Date</th><th>Video</th><th>Run</th><th>What it was for</th></tr>
 </thead>
 <tbody>
 <!-- BEGIN:watched -->
-<tr><td>&mdash;</td><td colspan="3">Nothing logged yet. Entries go here as I watch them.</td></tr>
+<tr><td>Wed 19 Aug</td>
+  <td><a href="https://www.youtube.com/watch?v=18c3MTX0PK0">Welcome to C++</a></td>
+  <td>7:05</td>
+  <td>Orientation. What the language is for and who still writes it.</td></tr>
+<tr><td>&nbsp;</td>
+  <td><a href="https://www.youtube.com/watch?v=1OsGXuNA5cc">How to Setup C++ on Windows</a></td>
+  <td>8:36</td>
+  <td>Watched for the Visual Studio walkthrough, since that is the environment every later video is filmed in.</td></tr>
+<tr><td>&nbsp;</td>
+  <td><a href="https://www.youtube.com/watch?v=1E_kBSka_ec">How to Setup C++ on Mac</a></td>
+  <td>3:29</td>
+  <td>The short one. Not much here that applies to a CMake + clang setup.</td></tr>
+<tr><td>&nbsp;</td>
+  <td><a href="https://www.youtube.com/watch?v=LKLuvoY6U0I">How to Setup C++ on Linux</a></td>
+  <td>8:12</td>
+  <td>Rounded out the picture of what differs between platforms and what does not.</td></tr>
+<tr><td>Fri 21 Aug</td>
+  <td><a href="https://www.youtube.com/watch?v=SfGuIVzE_Os">How C++ Works</a></td>
+  <td>20:21</td>
+  <td>The overview of source &rarr; object &rarr; executable. Same ground as <a href="./lessons/0001-four-programs-not-one.html">Lesson 1</a>, drawn rather than described.</td></tr>
+<tr><td>&nbsp;</td>
+  <td><a href="https://www.youtube.com/watch?v=3tIqpEmWMLI">How the C++ Compiler Works</a></td>
+  <td>17:55</td>
+  <td>Translation units, and why the compiler is happy with a declaration it never sees defined.</td></tr>
+<tr><td>&nbsp;</td>
+  <td><a href="https://www.youtube.com/watch?v=H4s55GgAg0I">How the C++ Linker Works</a></td>
+  <td>15:52</td>
+  <td>The best one so far. Made <a href="./lessons/0003-the-linker-only-sees-what-you-listed.html">Lesson 3</a> land three days later, when I hit the error for real.</td></tr>
+<tr><td>&nbsp;</td>
+  <td><a href="https://www.youtube.com/watch?v=zB9RI8_wExo">Variables in C++</a></td>
+  <td>13:46</td>
+  <td>Types and sizes. Mostly known, but the memory-size framing was new.</td></tr>
+<tr><td>Mon 24 Aug</td>
+  <td><a href="https://www.youtube.com/watch?v=V9zuox47zr0">Functions in C++</a></td>
+  <td>9:50</td>
+  <td>Declaration versus definition, which turned out to be the whole story behind the link error I hit the same day.</td></tr>
+<tr><td>&nbsp;</td>
+  <td><a href="https://www.youtube.com/watch?v=9RJTQmK0YPI">C++ Header Files</a></td>
+  <td>15:10</td>
+  <td>Directly relevant: I had just split <code>Log</code> into its own file and broken the build. See <a href="./journal/2026-08-24.html">that day's entry</a>.</td></tr>
+<tr><td>&nbsp;</td>
+  <td><a href="https://www.youtube.com/watch?v=0ebzPwixrJA">How to DEBUG C++ in VISUAL STUDIO</a></td>
+  <td>19:20</td>
+  <td>Watched for the concepts &mdash; breakpoints, stepping, watching memory. The buttons are Visual Studio; the translation to my machine is in <a href="./reference/new-project.html">the new-project runbook</a>.</td></tr>
+<tr><td>Tue 25 Aug</td>
+  <td><a href="https://www.youtube.com/watch?v=_1AwR-un4Hk">Loops in C++ (for loops, while loops)</a></td>
+  <td>12:20</td>
+  <td>Familiar from other languages. Quick.</td></tr>
+<tr><td>&nbsp;</td>
+  <td><a href="https://www.youtube.com/watch?v=a3IZ8WaIFAA">Control Flow in C++ (continue, break, return)</a></td>
+  <td>8:20</td>
+  <td>Also quick.</td></tr>
+<tr><td>&nbsp;</td>
+  <td><a href="https://www.youtube.com/watch?v=DTxHyVn0ODg">POINTERS in C++</a></td>
+  <td>16:59</td>
+  <td>The one that mattered. A pointer is just an address, and the type is a promise about what is there. I worked through his <code>new char[8]</code> / <code>memset</code> / <code>char**</code> exercise in <a href="https://github.com/jaas29/mystl">mystl</a>. Pairs with <a href="./lessons/0005-the-heap-and-your-first-vector.html">Lesson 5</a>.</td></tr>
+<tr><td>&nbsp;</td>
+  <td><a href="https://www.youtube.com/watch?v=IzoFn3dfsPA">REFERENCES in C++</a></td>
+  <td>10:13</td>
+  <td>References as pointers that cannot be null and cannot be reseated. Explains the <code>int&amp;</code> return type on <code>operator[]</code> in Lesson 5.</td></tr>
 <!-- END:watched -->
 </tbody>
 </table>
@@ -55,15 +117,11 @@ it is mostly wasted on me.</p>
 <tr><th>When</th><th>Video</th><th>Channel</th><th>Pairs with</th></tr>
 </thead>
 <tbody>
-<tr class="queued"><td>P1, now</td>
+<tr class="queued"><td>P1, next</td>
   <td><a href="https://www.youtube.com/watch?v=wJ1L2nSIV1s">Stack vs Heap Memory in C++</a></td>
   <td>The Cherno</td>
-  <td><a href="./lessons/0005-the-heap-and-your-first-vector.html">Lesson 5</a>, Knowledge 1</td></tr>
-<tr class="queued"><td>P1, now</td>
-  <td><a href="https://www.youtube.com/watch?v=DTxHyVn0ODg">POINTERS in C++</a></td>
-  <td>The Cherno</td>
-  <td><a href="./lessons/0005-the-heap-and-your-first-vector.html">Lesson 5</a>, Knowledge 3</td></tr>
-<tr class="queued"><td>P1, now</td>
+  <td><a href="./lessons/0005-the-heap-and-your-first-vector.html">Lesson 5</a>, Knowledge 1. Next in the playlist after REFERENCES</td></tr>
+<tr class="queued"><td>P1, next</td>
   <td><a href="https://www.youtube.com/watch?v=NUZdUSqsCs4">The NEW Keyword in C++</a></td>
   <td>The Cherno</td>
   <td><a href="./lessons/0005-the-heap-and-your-first-vector.html">Lesson 5</a>, Knowledge 3</td></tr>

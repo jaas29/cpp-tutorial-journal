@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>21 Aug 2026 &mdash; A morning on how C++ actually gets built</title>
+<meta name="description" content="Four videos on the compiler and the linker. No code, but the linker one paid for itself three days later.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<link rel="stylesheet" href="../assets/journal.css">
+</head>
+<body>
+
+<p class="kicker"><a href="./">Journal</a> &middot; Friday 21 August 2026 &middot; Weeks 1&ndash;2</p>
+<h1>A morning on how C++ actually gets built</h1>
+<div class="entry">
+<h2>Watched</h2>
+<p>Four of The Cherno's C++ series, all on the pipeline rather than the language &mdash;
+<em>How C++ Works</em>, <em>How the C++ Compiler Works</em>, <em>How the C++ Linker Works</em>,
+and <em>Variables in C++</em>. About an hour, listed with the rest in
+<a href="../videos.html">the video log</a>.</p>
+
+<h2>Why these and not the language ones</h2>
+<p>This was deliberate. <a href="../lessons/0001-four-programs-not-one.html">Lesson 1</a> had
+already told me that <code>clang++ main.cpp</code> is four programs in a trench coat, and I
+understood the sentence without really believing it. Watching someone draw the object files
+appearing and then being stitched together is what made it concrete. Same content, different
+channel &mdash; and that ordering, read it then watch it, seems to work better for me than either
+alone.</p>
+
+<h2>What stuck</h2>
+<p>The compiler and the linker have completely different jobs and completely different knowledge.
+The compiler works on one translation unit at a time and will happily accept a function it has
+only ever seen <em>declared</em> &mdash; a promise that the thing exists somewhere. The linker is
+the one that has to make good on the promise, and it is the only stage that can tell you nobody
+ever wrote the function.</p>
+<p>I did not fully appreciate that until Monday, when I broke exactly this and got an error naming
+the one file that was fine. That is in <a href="./2026-08-24.html">the 24 August entry</a>.</p>
+
+<h2>No code today</h2>
+<p>Watching only. Worth noting rather than hiding &mdash; not every session produces a commit, and
+this one made the next three faster.</p>
+</div>
+</body>
+</html>

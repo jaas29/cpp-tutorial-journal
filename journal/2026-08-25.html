@@ -51,6 +51,16 @@ first and then break it three ways:</p>
 <a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0004-cmake-is-a-generator-not-a-compiler.md">learning
 record 0004</a>.</p>
 
+<h2>Watched</h2>
+<p><em>Loops</em> and <em>Control Flow</em> quickly, then the two that mattered:
+<em>POINTERS in C++</em> and <em>REFERENCES in C++</em>. A pointer is just an address, and the type
+on it is a promise about what is stored there &mdash; nothing more. I worked his
+<code>new char[8]</code> / <code>memset</code> / <code>char**</code> exercise through in
+<a href="https://github.com/jaas29/mystl">mystl</a> rather than just watching it.</p>
+<p>References being pointers that cannot be null and cannot be repointed is what makes the
+<code>int&amp;</code> return type on <code>operator[]</code> make sense, which I would otherwise
+have copied without understanding.</p>
+
 <h2>What broke</h2>
 <p>While preparing the next lesson, whose whole hook was going to be "write a Vector with no
 destructor and let AddressSanitizer show you the leak." I tested it first. It does not work.</p>
