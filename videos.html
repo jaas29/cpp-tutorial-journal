@@ -117,21 +117,42 @@ it is mostly wasted on me.</p>
 <tr><th>When</th><th>Video</th><th>Channel</th><th>Pairs with</th></tr>
 </thead>
 <tbody>
-<tr class="queued"><td>P1, next</td>
-  <td><a href="https://www.youtube.com/watch?v=wJ1L2nSIV1s">Stack vs Heap Memory in C++</a></td>
+<tr class="queued"><td>Tue 1 Sep</td>
+  <td><a href="https://www.youtube.com/watch?v=BvR1Pgzzr38">Copying and Copy Constructors in C++</a></td>
   <td>The Cherno</td>
-  <td><a href="./lessons/0005-the-heap-and-your-first-vector.html">Lesson 5</a>, Knowledge 1. Next in the playlist after REFERENCES</td></tr>
-<tr class="queued"><td>P1, next</td>
-  <td><a href="https://www.youtube.com/watch?v=NUZdUSqsCs4">The NEW Keyword in C++</a></td>
+  <td><strong>Watch first.</strong> Lesson 7. He builds a String class, hits the shallow-copy double free I hit in <a href="./lessons/0006-the-destructor-and-raii.html">Lesson 6</a>, and writes the deep copy.</td></tr>
+<tr class="queued"><td>Tue 1 Sep</td>
+  <td><a href="https://www.youtube.com/watch?v=iNuTwvD6ciI">Object Lifetime in C++ (Stack/Scope Lifetimes)</a></td>
   <td>The Cherno</td>
-  <td><a href="./lessons/0005-the-heap-and-your-first-vector.html">Lesson 5</a>, Knowledge 3</td></tr>
+  <td>The RAII half of <a href="./lessons/0006-the-destructor-and-raii.html">Lesson 6</a>, drawn. Review rather than new ground, which is the point.</td></tr>
+<tr class="queued"><td>Wed 2 Sep</td>
+  <td><a href="https://www.youtube.com/watch?v=ehMg6zvXuMY">Move Semantics in C++</a></td>
+  <td>The Cherno</td>
+  <td>Lesson 8. A pair with the next row, and only in this order &mdash; both continue the String class from the copy-constructor video.</td></tr>
+<tr class="queued"><td>Wed 2 Sep</td>
+  <td><a href="https://www.youtube.com/watch?v=OWNeCTd7yQE">std::move and the Move Assignment Operator in C++</a></td>
+  <td>The Cherno</td>
+  <td>Lesson 8, second half. <a href="./reference/ownership.html">Ownership sheet</a> section 3.</td></tr>
+<tr class="queued"><td>Thu 3 Sep</td>
+  <td><a href="https://www.youtube.com/watch?v=I-hZkUa9mIs">Templates in C++</a></td>
+  <td>The Cherno</td>
+  <td>When <code>Vector</code> becomes <code>Vector&lt;T&gt;</code>.</td></tr>
+<tr class="queued"><td>Optional</td>
+  <td><a href="https://www.youtube.com/watch?v=D8cWquReFqw">Destructors in C++</a></td>
+  <td>The Cherno</td>
+  <td>Short. Pairs with <a href="./lessons/0006-the-destructor-and-raii.html">Lesson 6</a>, already done &mdash; worth the slot only if I want the reinforcement.</td></tr>
+<tr class="queued"><td>Dropped</td>
+  <td><a href="https://www.youtube.com/watch?v=wJ1L2nSIV1s">Stack vs Heap Memory in C++</a>,
+  <a href="https://www.youtube.com/watch?v=NUZdUSqsCs4">The NEW Keyword in C++</a></td>
+  <td>The Cherno</td>
+  <td>Queued for Lesson 5, overtaken. I have since written the code and the leak check, so these would spend an hour confirming what the compiler already confirmed. <strong>Do not watch backwards.</strong></td></tr>
 <tr class="queued"><td>P1, later</td>
   <td><a href="https://www.youtube.com/watch?v=ryRf4Jh_YC0">VECTOR / DYNAMIC ARRAY &mdash; Making
   DATA STRUCTURES in C++</a></td>
   <td>The Cherno</td>
-  <td><strong>Not yet.</strong> Assumes templates, move semantics and in-place construction. This
-  is the review video for <em>after</em> the destructor and copy-constructor lessons, not a
-  companion to Lesson 5.</td></tr>
+  <td><strong>After the templates video, not before.</strong> Assumes templates, move semantics and
+  in-place construction. At that point it stops being a firehose and becomes the best review
+  available: every decision he makes is one I will have already made and gotten wrong once.</td></tr>
 <tr class="queued"><td>P1</td>
   <td>Herb Sutter, <em>Leak-Freedom in C++</em> (CppCon 2016)</td>
   <td>CppCon</td>

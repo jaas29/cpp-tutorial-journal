@@ -37,13 +37,33 @@ style.** Where a video's syntax disagrees with learncpp, learncpp wins (per the 
   literally P1. Start with: *Pointers in C++*, *References in C++*, *Object Lifetime (Stack Scope
   Lifetimes)*, *Smart Pointers*, then *Writing a VECTOR (dynamic array)*.
 
-  **Verified URLs** (titles confirmed against YouTube 2026-08-25; runtimes not verified):
-  - [Stack vs Heap Memory in C++](https://www.youtube.com/watch?v=wJ1L2nSIV1s) — pairs with Lesson 5, Knowledge 1
-  - [POINTERS in C++](https://www.youtube.com/watch?v=DTxHyVn0ODg) — pairs with Lesson 5, Knowledge 3
-  - [The NEW Keyword in C++](https://www.youtube.com/watch?v=NUZdUSqsCs4) — pairs with Lesson 5, Knowledge 3
+  **Verified URLs** (titles confirmed against YouTube; runtimes not verified). Ordering is the
+  watch order — each one pairs with the lesson beside it, and watching ahead of the lesson wastes
+  the video. Current position: Lesson 6 done, so start at *Copying and Copy Constructors*.
+  - [POINTERS in C++](https://www.youtube.com/watch?v=DTxHyVn0ODg) — Lesson 5. *Watched 25 Aug.*
+  - [REFERENCES in C++](https://www.youtube.com/watch?v=IzoFn3dfsPA) — Lesson 5. *Watched 25 Aug.*
+  - [Destructors in C++](https://www.youtube.com/watch?v=D8cWquReFqw) — Lesson 6. Short; optional
+    reinforcement now that the lesson is done.
+  - [Object Lifetime in C++ (Stack/Scope Lifetimes)](https://www.youtube.com/watch?v=iNuTwvD6ciI)
+    — Lesson 6, the RAII half, drawn.
+  - [Copying and Copy Constructors in C++](https://www.youtube.com/watch?v=BvR1Pgzzr38) —
+    **Lesson 7, watch this first.** He builds a `String`, hits the shallow-copy double free, and
+    writes the deep copy. Exactly the bug sitting in `p1-containers` right now.
+  - [Move Semantics in C++](https://www.youtube.com/watch?v=ehMg6zvXuMY) — Lesson 8.
+  - [std::move and the Move Assignment Operator in C++](https://www.youtube.com/watch?v=OWNeCTd7yQE)
+    — Lesson 8. A pair with the previous one, in that order; both continue the same `String` class.
+  - [Templates in C++](https://www.youtube.com/watch?v=I-hZkUa9mIs) — when `Vector` becomes
+    `Vector<T>`.
   - [VECTOR/DYNAMIC ARRAY — Making DATA STRUCTURES in C++](https://www.youtube.com/watch?v=ryRf4Jh_YC0)
-    — **not yet.** Assumes templates, move semantics and in-place construction. It is the review
-    video for *after* the destructor and copy-constructor lessons, not a companion to Lesson 5.
+    — **after the templates video, not before.** Assumes templates, move semantics and in-place
+    construction. At that point it is the best available review, because every decision in it is
+    one José will already have made and gotten wrong once.
+
+  **Overtaken, do not watch backwards:**
+  [Stack vs Heap Memory in C++](https://www.youtube.com/watch?v=wJ1L2nSIV1s) and
+  [The NEW Keyword in C++](https://www.youtube.com/watch?v=NUZdUSqsCs4) were queued for Lesson 5.
+  The code and the leak check are written, so they would now spend an hour confirming what the
+  compiler already confirmed. At 5-6 hours a week that is not a free choice.
 
   **Caveat:** he uses raw `new`/`delete` and some pre-C++17 style. Inside P1 that is fine and
   correct — writing a container means you *are* the one doing manual memory. Do not carry the
