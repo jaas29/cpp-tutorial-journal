@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 6 &mdash; The Destructor, and the Bug It Creates</title>
+<meta name="description" content="One function fixes the leak from Lesson 5 &mdash; and immediately turns a silent leak into a double free. RAII, and why the destructor is never the whole answer.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<link rel="stylesheet" href="../assets/quiz.css">
+</head>
+<body>
+
+<p class="kicker">Lesson 06 &middot; Weeks 1&ndash;2 &middot; 2 days to the Sep 2 checkpoint</p>
+<h1>The Destructor, and the Bug It Creates</h1>
+<p class="standfirst">Lesson 5 left a leak in <code>Vector</code> on purpose. Fixing it takes one
+line. The interesting part is what happens next: that one line converts a leak that nothing on your
+machine could see into a crash that aborts the program. Both bugs were always there. The destructor
+only made one of them loud.</p>
+
+<h2><span class="num">Knowledge 1</span>A function that runs when the brace closes</h2>
+
+<p>In Lesson 5 you saw the C++ side of the Java table: <code>Vector v;</code> <em>is</em> the object,
+it lives in the stack frame, and it dies at the closing brace of its scope &mdash; at a moment you
+can point to in the source.</p>
+
+<p>C++ lets you attach code to that moment. A <strong>destructor</strong> is a member function named
+<code>~ClassName</code>, taking no arguments and returning nothing, that the compiler calls
+automatically when the object is destroyed. You never call it yourself.</p>
+
+<pre><code>~Vector() { delete[] m_data; }</code></pre>
+
+<p>Three things about it that are not obvious:</p>
+
+<ul>
+  <li>It runs on <strong>every</strong> exit from the scope &mdash; falling off the end, an early
+  <code>return</code>, or an exception unwinding through. There is no path out of the block that
+  skips it. This is the property that makes it trustworthy in a way a <code>delete[]</code> you
+  wrote by hand at the bottom of the function is not.</li>
+  <li>It runs on the <em>object</em>, not on the buffer. <code>v</code>&rsquo;s three members are
+  reclaimed by the stack pointer moving regardless; the destructor exists so that the heap buffer
+  <code>m_data</code> points at gets released too.</li>
+  <li><code>delete[] nullptr</code> is defined and does nothing. So a <code>Vector</code> that was
+  never pushed to destroys itself correctly with no special case.</li>
+</ul>
+
+<figure>
+<svg viewBox="0 0 620 210" role="img" aria-label="Two timelines. Without a destructor, the stack frame vanishes at the closing brace and the heap buffer remains allocated and unreachable. With a destructor, the closing brace first calls the destructor, which frees the heap buffer, and then the frame vanishes.">
+  <text class="svg-mono svg-faint" x="14" y="18" font-size="9">WITHOUT A DESTRUCTOR</text>
+  <rect class="svg-box" x="14" y="26" width="120" height="58" rx="3"/>
+  <text class="svg-mono svg-ink" x="24" y="46" font-size="9">m_data ─────┐</text>
+  <text class="svg-mono svg-ink" x="24" y="60" font-size="9">m_size = 5</text>
+  <text class="svg-mono svg-ink" x="24" y="74" font-size="9">m_cap  = 8</text>
+  <text class="svg-mono svg-faint" x="24" y="98" font-size="8.5">stack frame</text>
+
+  <path class="svg-stroke" d="M134 44 H190" stroke-width="1"/>
+  <path class="svg-stroke" d="M182 39 l8 5 -8 5" stroke-width="1"/>
+  <rect class="svg-box" x="190" y="26" width="86" height="58" rx="3"/>
+  <text class="svg-mono svg-ink" x="200" y="50" font-size="9">32 bytes</text>
+  <text class="svg-mono svg-faint" x="200" y="66" font-size="8.5">on the heap</text>
+
+  <text class="svg-mono svg-accent" x="296" y="48" font-size="9">&rarr;  }  &rarr;</text>
+
+  <rect class="svg-box" x="358" y="26" width="120" height="58" rx="3" opacity="0.25"/>
+  <text class="svg-mono svg-faint" x="368" y="58" font-size="8.5">frame gone</text>
+  <rect class="svg-box" x="500" y="26" width="86" height="58" rx="3"/>
+  <text class="svg-mono svg-ink" x="510" y="50" font-size="9">32 bytes</text>
+  <text class="svg-mono svg-accent" x="510" y="66" font-size="8.5">LEAKED</text>
+  <text class="svg-mono svg-faint" x="500" y="98" font-size="8.5">still allocated, address forgotten</text>
+
+  <path class="svg-rule" d="M14 118 H606"/>
+
+  <text class="svg-mono svg-faint" x="14" y="140" font-size="9">WITH ~Vector()</text>
+  <rect class="svg-box" x="14" y="148" width="120" height="42" rx="3"/>
+  <text class="svg-mono svg-ink" x="24" y="164" font-size="9">m_data ─────┐</text>
+  <text class="svg-mono svg-faint" x="24" y="180" font-size="8.5">stack frame</text>
+  <path class="svg-stroke" d="M134 160 H190" stroke-width="1"/>
+  <path class="svg-stroke" d="M182 155 l8 5 -8 5" stroke-width="1"/>
+  <rect class="svg-box" x="190" y="148" width="86" height="42" rx="3"/>
+  <text class="svg-mono svg-ink" x="200" y="172" font-size="9">32 bytes</text>
+
+  <text class="svg-mono svg-accent" x="290" y="164" font-size="9">&rarr; } calls ~Vector &rarr;</text>
+
+  <rect class="svg-box" x="416" y="148" width="120" height="42" rx="3" opacity="0.25"/>
+  <text class="svg-mono svg-faint" x="426" y="174" font-size="8.5">frame gone</text>
+  <rect class="svg-box" x="546" y="148" width="60" height="42" rx="3" opacity="0.25" stroke-dasharray="3 2"/>
+  <text class="svg-mono svg-faint" x="556" y="174" font-size="8.5">freed</text>
+</svg>
+<figcaption>The closing brace destroys the object either way. The destructor is the hook that lets
+the object take its heap buffer down with it.</figcaption>
+</figure>
+
+<h2><span class="num">Knowledge 2</span>RAII, and why it has a bad name</h2>
+
+<p>The pattern has a name you will hear constantly: <strong>RAII</strong>, Resource Acquisition Is
+Initialization. It is a famously unhelpful name, because the half that matters is the release, not
+the acquisition. Read it as: <em>tie the lifetime of a resource to the lifetime of an object, so
+that scope exit does the cleanup.</em></p>
+
+<p>The resource does not have to be memory. The same shape covers a file handle, a mutex lock, a
+socket, a database connection. Acquire in the constructor, release in the destructor, and then the
+only thing you have to get right is the object&rsquo;s scope &mdash; which the language already
+enforces.</p>
+
+<div class="aside">
+  <span class="label">This is the answer to &ldquo;where is the garbage collector?&rdquo;</span>
+  Java frees memory eventually, at a time nobody chooses, and has nothing to say about your file
+  handles. C++ frees everything at a point in the source you can name, deterministically. That
+  determinism <em>is</em> the feature, and it is bought entirely with destructors. When your mission
+  says raw <code>new</code>/<code>delete</code> is banned outside a container, RAII is what replaces
+  it: <code>std::vector</code>, <code>std::unique_ptr</code> and friends are all just this lesson,
+  written once by somebody else.
+</div>
+
+<h2><span class="num">Build 1</span>One line, and the leak is gone</h2>
+
+<p>In <code>~/projects/p1-containers/include/containers/vector.hpp</code>, add a destructor to
+<code>Vector</code>. <strong>It goes inside the class body</strong> &mdash; at the top of the
+existing <code>public:</code> block, above <code>push_back</code>. Constructors and the destructor
+conventionally come first, because they are what a reader looks for when asking what a type owns.</p>
+
+<p class="filename">include/containers/vector.hpp &mdash; inside <code>class Vector { ... };</code></p>
+<pre><code>    public:
+        // Releases the buffer this Vector owns. Runs automatically at scope exit,
+        // on every path out - including an exception unwinding through.
+        // delete[] on nullptr is defined and does nothing, so a Vector that was
+        // never pushed to needs no special case.
+        ~Vector() { delete[] m_data; }
+
+        // Append one value to the end.
+        void push_back(int value)
+        ...</code></pre>
+
+<p>You do not need a second <code>public:</code>. An access specifier stays in effect until the next
+one, so the block opened before <code>push_back</code> already covers this.</p>
+
+<div class="aside">
+  <span class="label">If you get <code>error: expected unqualified-id</code> on the word <code>public</code></span>
+  <p>You have put the destructor below the class&rsquo;s closing <code>};</code> rather than inside
+  it, so it landed at <em>namespace</em> scope. <code>public:</code> is an access specifier, and
+  access control is a property of a class &mdash; a namespace has none, so the keyword cannot legally
+  begin a declaration there. The braces still balance, which is why the error appears at
+  <code>public</code> and not at the real culprit, the <code>};</code> now sitting above your new
+  code.</p>
+  <p>The destructor underneath it would be wrong for a second reason too: <code>~Vector</code> is
+  only a destructor when declared inside the class it destroys, and <code>m_data</code> outside the
+  class refers to nothing, because there is no object to read it from.</p>
+</div>
+
+<p>Then delete the <code>NOTE:</code> comment at the bottom of the file about the deliberate leak.
+It is no longer true, and a stale comment is worse than no comment.</p>
+
+<p>Now prove it. Remember from <a
+href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0006-ubsan-instrumentation-hides-leaks-from-leaks.md">record
+0006</a> that <em>neither</em> preset can see leaks &mdash; <code>asan</code> because LeakSanitizer
+does not exist on Darwin, <code>dev</code> because UBSan hides the allocation from
+<code>leaks</code>. So leak checking needs its own unflagged build. Your existing
+<code>tests/main.cpp</code> needs no changes: <code>-atExit</code> runs the analysis after
+<code>main</code> has returned, so a <code>Vector</code> declared directly in <code>main</code> has
+already been destroyed by the time <code>leaks</code> looks.</p>
+
+<pre><code>$ /usr/bin/clang++ -std=c++20 -g -Iinclude tests/main.cpp -o /tmp/leakcheck
+$ MallocStackLogging=1 leaks -atExit -- /tmp/leakcheck
+
+Process 17726: 188 nodes malloced for 32 KB
+Process 17726: 0 leaks for 0 total leaked bytes.</code></pre>
+
+<p>Compare that to Lesson 5&rsquo;s <code>1 leak for 48 total leaked bytes</code>. Same program, one
+extra function. Commit this.</p>
+
+<div class="aside">
+  <span class="label">Make the test prove something</span>
+  <p><code>0 leaks</code> is only evidence if the same check would have said <code>1 leak</code>
+  without your fix. A test that passes for the wrong reason is worse than no test, and leak checking
+  on this machine has already produced two of those (records 0005 and 0006).</p>
+  <p>So verify the verifier: temporarily empty the destructor body, rebuild, rerun. You should get
+  <code>ROOT LEAK: &lt;malloc in containers::Vector::grow()&gt;</code>, 48 bytes. Put the
+  <code>delete[]</code> back and it returns to zero. Now the zero means something.</p>
+</div>
+
+<h2><span class="num">The new bug</span>Now copy it</h2>
+
+<p>Add three lines to <code>tests/main.cpp</code>. Nothing here looks dangerous:</p>
+
+<pre><code>containers::Vector a;
+for (int i = 0; i &lt; 5; ++i) a.push_back(i * 10);
+
+containers::Vector b = a;    // copy
+b[0] = 999;
+std::cout &lt;&lt; "a[0] = " &lt;&lt; a[0] &lt;&lt; "\n";</code></pre>
+
+<p>You did not write a copy constructor, so the compiler wrote one for you. Its rule is simple and,
+here, catastrophic: <strong>copy each member</strong>. <code>m_size</code> and <code>m_cap</code>
+copy fine. <code>m_data</code> is a pointer, so copying it copies the <em>address</em> &mdash; not
+what it points at. Two <code>Vector</code> objects, one buffer, and each of them believes it owns
+it.</p>
+
+<figure>
+<svg viewBox="0 0 620 150" role="img" aria-label="Two Vector objects, a and b, whose m_data members both hold the same heap address. Both destructors call delete on that one buffer.">
+  <rect class="svg-box" x="20" y="26" width="150" height="46" rx="3"/>
+  <text class="svg-mono svg-soft" x="30" y="20" font-size="9">a</text>
+  <text class="svg-mono svg-ink" x="30" y="44" font-size="9">m_data = 0x6030..1c00</text>
+  <text class="svg-mono svg-ink" x="30" y="62" font-size="9">m_size = 5   m_cap = 8</text>
+
+  <rect class="svg-box" x="20" y="92" width="150" height="46" rx="3"/>
+  <text class="svg-mono svg-soft" x="30" y="88" font-size="9">b</text>
+  <text class="svg-mono svg-ink" x="30" y="110" font-size="9">m_data = 0x6030..1c00</text>
+  <text class="svg-mono svg-ink" x="30" y="128" font-size="9">m_size = 5   m_cap = 8</text>
+
+  <path class="svg-stroke" d="M170 48 H300" stroke-width="1"/>
+  <path class="svg-stroke" d="M292 43 l8 5 -8 5" stroke-width="1"/>
+  <path class="svg-stroke" d="M170 114 H260 V60 H300" stroke-width="1"/>
+  <path class="svg-stroke" d="M292 55 l8 5 -8 5" stroke-width="1"/>
+  <text class="svg-mono svg-accent" x="188" y="80" font-size="8.5">the same address</text>
+
+  <rect class="svg-box" x="300" y="26" width="180" height="46" rx="3"/>
+  <text class="svg-mono svg-ink" x="312" y="50" font-size="9">one 32-byte buffer</text>
+  <text class="svg-mono svg-faint" x="312" y="65" font-size="8.5">allocated once, in grow()</text>
+
+  <text class="svg-mono svg-accent" x="300" y="98" font-size="9">~b : delete[] 0x6030..1c00   ok</text>
+  <text class="svg-mono svg-accent" x="300" y="118" font-size="9">~a : delete[] 0x6030..1c00   double free</text>
+  <text class="svg-mono svg-faint" x="300" y="136" font-size="8.5">destructors run in reverse order of construction</text>
+</svg>
+<figcaption>The default copy constructor is a member-by-member copy. For a pointer member that means
+sharing, and sharing plus a destructor means freeing twice.</figcaption>
+</figure>
+
+<p>Build it with the <code>dev</code> preset first, because what you get is worth seeing:</p>
+
+<pre><code>$ ./build/dev/tests
+$ echo $?
+133</code></pre>
+
+<p>No message. Nothing on stderr, and not even the <code>a[0] = ...</code> line, because the process
+is killed before <code>stdout</code> is flushed. Exit 133 is 128 + 5, meaning the process died on
+signal 5. That is the entire diagnostic. Two days before a checkpoint, that is the kind of failure
+that eats an evening.</p>
+
+<p>Now the <code>asan</code> preset:</p>
+
+<pre><code>$ ./build/asan/tests
+
+==17755==ERROR: AddressSanitizer: attempting double-free on 0x603000001c00 in thread T0:
+    #1 containers::Vector::~Vector()  vector.hpp:9
+    #3 main                           main.cpp:10
+
+freed by thread T0 here:
+    #1 containers::Vector::~Vector()  vector.hpp:9
+    #3 main                           main.cpp:10
+
+previously allocated by thread T0 here:
+    #1 containers::Vector::grow()     vector.hpp:21
+    #2 containers::Vector::push_back(int) vector.hpp:11
+    #3 main                           main.cpp:5
+
+SUMMARY: AddressSanitizer: double-free vector.hpp:9 in containers::Vector::~Vector()
+a[0] = 999</code></pre>
+
+<p>Three stacks, and read together they are the whole story: freed <em>here</em>, freed again
+<em>here</em>, and the memory came from <em>there</em>. This is what the second preset was for, and
+it is the concrete answer if Prof. Roy asks why you carry two toolchains.</p>
+
+<p>Note the last line too: <code>a[0] = 999</code>. You wrote to <code>b</code> and
+<code>a</code> changed. That is the Java aliasing behaviour from Lesson 5&rsquo;s table, showing up
+in C++ by accident &mdash; and it is a bug in its own right, independent of the crash.</p>
+
+<div class="aside">
+  <span class="label">Stop the bleeding today</span>
+  <p>The real fix is a copy constructor that allocates its own buffer &mdash; that is the next
+  lesson, and it is checkpoint material. Until you write it, make the compiler refuse the copy
+  rather than silently producing a broken one:</p>
+  <pre><code>Vector() = default;                        // see below - not optional
+Vector(const Vector&amp;) = delete;
+Vector&amp; operator=(const Vector&amp;) = delete;</code></pre>
+  <p><strong><code>Vector() = default;</code> is required, and leaving it out is the next error you
+  will hit.</strong> The compiler generates a default constructor for you only while you have
+  declared no constructor at all. <code>Vector(const Vector&amp;) = delete;</code> is a declaration
+  &mdash; deleting a function still declares it &mdash; so adding it removes the zero-argument
+  constructor that <code>containers::Vector a;</code> has been calling since Lesson 5:</p>
+  <pre><code>error: no matching constructor for initialization of 'containers::Vector'
+    6 |     containers::Vector a;
+note: candidate constructor not viable: requires 1 argument, but 0 were provided
+   56 |         Vector(const Vector &amp;) = delete;</code></pre>
+  <p><code>= default</code> asks for the one the compiler would have written anyway. With it in
+  place, <code>Vector b = a;</code> is a compile error naming the deleted function, instead of a
+  runtime abort with no message. A non-copyable type is a legitimate design choice, not a
+  placeholder hack &mdash; <code>std::unique_ptr</code> is exactly this. Commit it, and delete the
+  two lines when the real copy constructor lands.</p>
+</div>
+
+<h2><span class="num">Knowledge 3</span>The rule this is an instance of</h2>
+
+<p>Once a class has a destructor that does real work, it owns something, and the compiler-written
+copy operations are almost certainly wrong for it. The <strong>Rule of Three</strong> (C++98) says:
+if you write any of the destructor, copy constructor, or copy assignment operator, you probably need
+all three. C++11 adds move construction and move assignment, making it the <strong>Rule of
+Five</strong>.</p>
+
+<p>You have just written one of the five. That is exactly why a bug appeared &mdash; and then a
+second one, at compile time, when the <code>= delete</code> stopgap took your default constructor
+away. Neither was a mistake in what you typed. Both are the same mechanism: <strong>declaring any
+one of these functions changes what the compiler generates for the others</strong>, with no
+warning.</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>You declare</th><th>Compiler silently stops generating</th><th>You find out</th></tr>
+<tr><td>any constructor</td><td>the default constructor</td><td>Compile error &mdash; the good case</td></tr>
+<tr><td>a destructor</td><td>both move operations</td><td>Never. Your moves become copies.</td></tr>
+<tr><td>a copy constructor</td><td>both moves, and the default constructor</td><td>Half at compile time, half never</td></tr>
+</table>
+</div>
+
+<p>That entanglement is the real argument behind Core Guideline C.21 &mdash; not tidiness. The card with all
+five, when the compiler generates each, and what each one has to do, is on the new reference sheet:
+<a href="../reference/ownership.html">Ownership and the Rule of Five</a>. That sheet is the map for
+the rest of Project 1.</p>
+
+<h2><span class="num">Skill</span>Retrieval</h2>
+
+<div class="quiz" data-quiz data-title="Check yourself">
+  <ol class="quiz-items">
+    <li class="quiz-q" data-answer="4" data-explain="A destructor runs on every exit from the scope, including an early return and an exception unwinding through it. That guarantee is the whole reason RAII is trustworthy; a hand-written delete[] at the bottom of the function is skipped by both.">
+      <p class="quiz-prompt">Which exit from a scope skips the destructor?</p>
+      <ul class="quiz-options">
+        <li>An exception thrown inside</li>
+        <li>An early return statement</li>
+        <li>Falling off the closing brace</li>
+        <li>None of these skip it</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="2" data-explain="The compiler-generated copy constructor copies each member. For m_data that copies the address, so both objects point at one buffer and both destructors free it.">
+      <p class="quiz-prompt">Why does <code>Vector b = a;</code> now crash?</p>
+      <ul class="quiz-options">
+        <li>The buffer is too small</li>
+        <li>Both objects free one buffer</li>
+        <li>Vector has no constructor</li>
+        <li>Copying resets the capacity</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="3" data-explain="The dev build aborted on signal 5 with exit 133 and printed nothing at all. The asan build named the free, the second free, and the allocation site. This is the case for keeping two presets.">
+      <p class="quiz-prompt">On the double free, what did the <code>dev</code> build report?</p>
+      <ul class="quiz-options">
+        <li>A symbolized double-free stack</li>
+        <li>A warning at compile time</li>
+        <li>Nothing beyond exit code 133</li>
+        <li>A leak of thirty-two bytes</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="1" data-explain="Writing any one of the destructor, copy constructor or copy assignment means the class owns a resource, so the other two are almost certainly wrong as generated. C++11 extends this to five with the move operations.">
+      <p class="quiz-prompt">The Rule of Three says writing one of them means what?</p>
+      <ul class="quiz-options">
+        <li>You likely need all three</li>
+        <li>You should delete the rest</li>
+        <li>The class cannot be copied</li>
+        <li>The compiler writes no more</li>
+      </ul>
+    </li>
+  </ol>
+</div>
+
+<div class="recall" data-recall>
+  <p class="recall-front">Out loud, in one sentence each: what does RAII tie together, and what
+  does the compiler&rsquo;s copy constructor do to a pointer member?</p>
+  <p class="recall-back">RAII ties the lifetime of a resource to the lifetime of an object, so that
+  scope exit releases it on every path out. The generated copy constructor copies each member, so a
+  pointer member is copied as an address &mdash; two objects, one buffer, two frees.</p>
+</div>
+
+<div class="source">
+  <p><strong>Read this one first.</strong> Everything above is the mechanism; this is the
+  authority.</p>
+
+  <div class="table-wrap">
+  <table>
+  <tr><th>This lesson</th><th>Read (learncpp)</th><th>Watch (The Cherno)</th></tr>
+  <tr>
+    <td>Knowledge 1 &mdash; the destructor</td>
+    <td><a href="https://www.learncpp.com/cpp-tutorial/destructors/">Destructors</a></td>
+    <td><a href="https://www.youtube.com/watch?v=D8cWquReFqw">Destructors in C++</a></td>
+  </tr>
+  <tr>
+    <td>Knowledge 2 &mdash; RAII</td>
+    <td><a href="https://www.learncpp.com/cpp-tutorial/destructors/">Destructors</a>, closing section</td>
+    <td><a href="https://www.youtube.com/watch?v=D8cWquReFqw">Destructors in C++</a></td>
+  </tr>
+  <tr>
+    <td>Knowledge 3 &mdash; the Rule of Three</td>
+    <td><a href="https://www.learncpp.com/cpp-tutorial/shallow-vs-deep-copying/">Shallow vs deep copying</a></td>
+    <td>&mdash;</td>
+  </tr>
+  <tr>
+    <td>The authority to cite in review</td>
+    <td colspan="2"><a href="https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rc-five">Core Guidelines C.21</a> &mdash; &ldquo;If you define or <code>=delete</code> any copy, move, or destructor function, define or <code>=delete</code> them all&rdquo;</td>
+  </tr>
+  </table>
+  </div>
+
+  <p>The learncpp chapter on shallow vs deep copying is the single highest-value read here: it is
+  this exact bug, with this exact class, written by the source your mission says wins on style.</p>
+</div>
+
+<footer>
+  <h2>Where this sits</h2>
+  <p>Before: <a href="./0005-the-heap-and-your-first-vector.html">Lesson 5 &mdash; The Heap, and Your
+  First Vector</a>, which planted the leak this lesson fixes.</p>
+  <p>Reference: <a href="../reference/ownership.html">Ownership and the Rule of Five</a> (new
+  &mdash; print this one). <a href="../reference/vector-internals.html">Vector internals</a> for
+  size, capacity and growth. <a href="../reference/toolchain.html">Toolchain</a> for the leak-check
+  command line, which is a third build and not a preset.</p>
+  <p>Next: <strong>the copy constructor and deep copy</strong> &mdash; replacing the
+  <code>= delete</code> stopgap with a copy that allocates its own buffer. Then move semantics.
+  Those two are the remaining checkpoint deliverable.</p>
+  <p class="ask">Ask me anything here that did not land. The two that usually need a second pass are
+  why the compiler writes a copy constructor you never asked for, and why exit 133 has no message
+  attached to it.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

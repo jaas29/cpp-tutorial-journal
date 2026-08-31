@@ -53,6 +53,8 @@ compiled and ran on my machine; the commands and their output are real, not illu
     <span class="note">CMake is a generator, not a build system. What it actually buys you is the dependency graph.</span></li>
   <li><a href="./lessons/0005-the-heap-and-your-first-vector.html">Lesson 5 — The Heap, and Your First Vector</a>
     <span class="note">Stack versus heap, and a forty-line Vector that grows &mdash; containing a deliberate leak to find with a tool.</span></li>
+  <li><a href="./lessons/0006-the-destructor-and-raii.html">Lesson 6 &mdash; The Destructor, and the Bug It Creates</a>
+    <span class="note">One function fixes the leak from Lesson 5 &mdash; and immediately turns a silent leak into a double free. RAII, and why the destructor is never the whole answer.</span></li>
   <li><a href="./lessons/recall-01-weeks-1-2.html">Recall — Weeks 1&ndash;2</a>
     <span class="note">Interactive recall over weeks 1&ndash;2: the build pipeline, CMake, the heap, and the first Vector.</span></li>
 <!-- END:lessons -->
@@ -69,6 +71,8 @@ the keyboard.</p>
     <span class="note">Plain definitions of the terms as they come up: translation unit, stack, heap, pointer, capacity.</span></li>
   <li><a href="./reference/new-project.html">Reference — Starting a New C++ Project</a>
     <span class="note">Runbook for starting a scratch project with newcpp, plus a Visual Studio to macOS translation table.</span></li>
+  <li><a href="./reference/ownership.html">Reference &mdash; Ownership and the Rule of Five</a>
+    <span class="note">The five special member functions: when the compiler writes each one, what each must do for a type that owns a heap buffer, and the Core Guidelines rule to cite in review.</span></li>
   <li><a href="./reference/toolchain.html">Reference — Build Pipeline &amp; Error Triage</a>
     <span class="note">The build pipeline on this Mac, and how to triage an error back to the stage that produced it.</span></li>
   <li><a href="./reference/vector-internals.html">Reference — How a Vector Works Inside</a>
@@ -87,6 +91,7 @@ it. These are the ones where the answer was not in any tutorial.</p>
   <li><a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0004-cmake-is-a-generator-not-a-compiler.md">CMake earns its place through the dependency graph, not through convenience</a></li>
   <li><a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0005-asan-does-not-detect-leaks-on-macos.md">AddressSanitizer reports no leaks on macOS; <code>leaks</code> fills the gap</a></li>
   <li><a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0006-ubsan-instrumentation-hides-leaks-from-leaks.md"><code>-fsanitize=undefined</code> makes Apple's <code>leaks</code> report zero leaks</a></li>
+  <li><a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0007-dev-preset-aborts-silently-on-heap-corruption.md">A heap-corruption abort under the <code>dev</code> preset prints nothing at all</a></li>
 <!-- END:records -->
 </ul>
 

@@ -51,3 +51,28 @@ and git had a single commit. **8 days to the Sep 2 checkpoint**, whose deliverab
 with copy and move semantics, `push_back`, `operator[]`, and STL-compatible iterators, clean under
 both sanitizers. Recoverable, but only at roughly one concept per day from here — the remaining
 lessons (RAII, copy, move, templates, iterators) are the checkpoint, not preparation for it.
+
+---
+
+## Correction, 2026-08-31
+
+The scope condition above is wrong, and was retested today against José's real `tests/main.cpp`.
+
+`leaks -atExit` performs its analysis **after `main` returns**, so a `Vector` declared directly in
+`main` has already been destroyed by the time `leaks` looks. No wrapping block is needed. Verified
+three ways on the same unflagged Apple-clang build of his file:
+
+```
+destructor present, no wrapping block   -> 0 leaks for 0 total
+destructor body emptied, no block       -> ROOT LEAK: <malloc in containers::Vector::grow()>, 48 bytes
+no destructor declared at all, no block -> ROOT LEAK: <malloc in containers::Vector::grow()>, 48 bytes
+```
+
+What produced the original claim was not established. The rest of the record stands: LeakSanitizer
+is unsupported on Darwin, `leaks` fills the gap, and the report names the allocation site rather
+than the missing free.
+
+The transferable lesson is the one that generalises past this detail: **a passing leak check is
+only evidence if the same check fails without the fix.** [[lessons/0006-the-destructor-and-raii.html]]
+now instructs emptying the destructor body and re-running before trusting a zero, and the wrapping
+block has been removed from it.

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>31 Aug 2026 &mdash; One line fixes the leak and creates a crash</title>
+<meta name="description" content="Destructors and RAII, the double free that appears the moment you add one, and a plan for the two days left before the Sep 2 checkpoint.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<link rel="stylesheet" href="../assets/journal.css">
+</head>
+<body>
+
+<p class="kicker"><a href="./">Journal</a> &middot; Monday 31 August 2026 &middot; Weeks 1&ndash;2 &middot; Project 1</p>
+<h1>One line fixes the leak and creates a crash</h1>
+<div class="entry">
+
+<h2>Where I actually am</h2>
+<p>Took stock at the start of the week. Lessons 1&ndash;5 are done: four on the build system and
+one on the heap. <code>p1-containers</code> has two commits and a <code>Vector</code> of
+<code>int</code> that grows by doubling, with <code>push_back</code>, <code>operator[]</code>,
+<code>size</code> and <code>capacity</code> &mdash; and a deliberate leak.</p>
+<p>Against the Sep 2 deliverable, that is roughly the first third. Still missing: the destructor,
+copy semantics, move semantics, the template parameter, and iterators. <strong>Two days.</strong>
+The honest read is that this checkpoint will land partial, so the plan is to go in order of what a
+container is actually judged on &mdash; ownership first, generality last &mdash; and be able to
+defend the ordering rather than arrive with five half-finished things.</p>
+
+<h2>Worked through</h2>
+<p><a href="../lessons/0006-the-destructor-and-raii.html">Lesson 6 &mdash; The Destructor, and the
+Bug It Creates</a>. A destructor is a member function the compiler calls at the closing brace, on
+every path out of the scope, including an exception unwinding through. <code>~Vector() { delete[]
+m_data; }</code> and Lesson 5's leak is gone &mdash; verified on the third, unflagged build, since
+neither preset can see leaks:</p>
+<pre><code>Process 17726: 0 leaks for 0 total leaked bytes.</code></pre>
+<p>RAII is the name for the pattern, and it is a bad name: the half that matters is the release.
+Tie a resource's lifetime to an object's lifetime, and scope exit does the cleanup. Memory is only
+the example &mdash; files, locks and sockets are the same shape.</p>
+
+<h2>What broke, on purpose</h2>
+<p>Then <code>containers::Vector b = a;</code>. I never wrote a copy constructor, so the compiler
+wrote one, and its rule is to copy each member. <code>m_data</code> is a pointer, so it copied the
+<em>address</em>. Two objects, one buffer, and now two destructors that each free it.</p>
+<p>Under the <code>dev</code> preset that is exit code <strong>133</strong> and nothing else. No
+message, no stack, not even the program's own last line of output, because the process is killed
+before <code>stdout</code> flushes. Under <code>asan</code> it is three stacks: freed here, freed
+again here, allocated in <code>grow()</code>. That is the clearest argument yet for carrying two
+toolchains, and it is recorded as
+<a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0007-dev-preset-aborts-silently-on-heap-corruption.md">learning
+record 0007</a>.</p>
+<p>The other half of it is quieter and arguably worse: I wrote to <code>b[0]</code> and
+<code>a[0]</code> changed. That is Java aliasing showing up in C++ by accident &mdash; a bug that
+exists before anything crashes.</p>
+<p>Stopgap committed while the real fix is unwritten: <code>Vector(const Vector&amp;) = delete;</code>
+and the same for copy assignment. A compile error naming a deleted function beats a silent abort.</p>
+
+<h2>New reference sheet</h2>
+<p><a href="../reference/ownership.html">Ownership and the Rule of Five</a>. All five special member
+functions, when the compiler generates each, what each has to do for a type that owns a buffer, and
+a symptom-to-cause triage table. The trap I did not know about: <em>writing a destructor suppresses
+the generated move operations</em>, so adding <code>~Vector()</code> silently turned every move in
+the program back into a copy. That is the mechanical reason the Rule of Three became the Rule of
+Five, and it is the sheet I want next to me for the rest of this project.</p>
+
+<h2>Next</h2>
+<p>Tomorrow: the copy constructor and copy assignment &mdash; deep copy, the self-assignment guard,
+and allocate-before-release. Then move semantics, which is the same five members plus one
+obligation: blank the source so its destructor has nothing left to free.</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reference &mdash; Ownership and the Rule of Five</title>
+<meta name="description" content="The five special member functions: when the compiler writes each one, what each must do for a type that owns a heap buffer, and the Core Guidelines rule to cite in review.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<style>
+  body { max-width: 46rem; padding-top: 2.5rem; font-size: 1rem; }
+  h2 { margin-top: 2rem; }
+  h3 { font-size: 1.05rem; font-weight: normal; font-style: italic;
+       color: var(--ink-soft); margin: 1.8rem 0 0.4rem; }
+  table { font-size: 0.83rem; }
+  pre { font-size: 0.78rem; }
+  .lede { font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.1em;
+          text-transform: uppercase; color: var(--accent); }
+</style>
+</head>
+<body>
+
+<p class="kicker">Reference sheet &middot; C++ Tutorial &middot; Project 1</p>
+<h1>Ownership and the Rule of Five</h1>
+<p class="standfirst">A class that holds a raw pointer to memory it allocated has taken on a job the
+compiler cannot do for it. This sheet is the five functions that job consists of, what each one must
+do, what happens if you leave it to the compiler, and the exact rule to cite when you are asked to
+defend the design.</p>
+
+<h2>1. The one question that decides everything</h2>
+
+<p><strong>Does this class own a resource?</strong> Owning means: something was acquired that must
+later be released exactly once, and this object is the record of it. A heap buffer from
+<code>new[]</code>, a file handle, a lock, a socket.</p>
+
+<ul>
+  <li><strong>No</strong> &mdash; it holds only values, or non-owning references, or types that
+  already manage themselves (<code>std::vector</code>, <code>std::string</code>,
+  <code>std::unique_ptr</code>). Write none of the five. This is the <strong>Rule of Zero</strong>,
+  and it is the right answer for almost every class you will write outside Project 1.</li>
+  <li><strong>Yes</strong> &mdash; you are writing a container. All five are now your problem,
+  because every one of the compiler&rsquo;s versions is wrong for you.</li>
+</ul>
+
+<h2>2. The five, and what the compiler does if you say nothing</h2>
+
+<div class="table-wrap">
+<table>
+<tr><th>Function</th><th>Signature</th><th>Runs when</th><th>Compiler&rsquo;s version does</th><th>Wrong for an owner because</th></tr>
+<tr>
+  <td>Destructor</td>
+  <td><code>~Vector()</code></td>
+  <td>Scope exit, on every path</td>
+  <td>Destroys each member</td>
+  <td>Destroying a pointer frees nothing. Leak.</td>
+</tr>
+<tr>
+  <td>Copy constructor</td>
+  <td><code>Vector(const Vector&amp;)</code></td>
+  <td><code>Vector b = a;</code>, pass by value, return</td>
+  <td>Copies each member</td>
+  <td>Copies the address. Two owners, one buffer, double free.</td>
+</tr>
+<tr>
+  <td>Copy assignment</td>
+  <td><code>Vector&amp; operator=(const Vector&amp;)</code></td>
+  <td><code>b = a;</code> on an existing <code>b</code></td>
+  <td>Assigns each member</td>
+  <td>Overwrites <code>b</code>&rsquo;s pointer. Leaks <code>b</code>&rsquo;s old buffer <em>and</em> double-frees <code>a</code>&rsquo;s.</td>
+</tr>
+<tr>
+  <td>Move constructor</td>
+  <td><code>Vector(Vector&amp;&amp;) noexcept</code></td>
+  <td><code>Vector b = std::move(a);</code>, returning a temporary</td>
+  <td>Not generated once you write a destructor</td>
+  <td>Absent, so every move silently becomes a copy. Correct, but slow.</td>
+</tr>
+<tr>
+  <td>Move assignment</td>
+  <td><code>Vector&amp; operator=(Vector&amp;&amp;) noexcept</code></td>
+  <td><code>b = std::move(a);</code></td>
+  <td>Not generated once you write a destructor</td>
+  <td>Same &mdash; falls back to copy assignment.</td>
+</tr>
+</table>
+</div>
+
+<h3>What declaring one does to the others</h3>
+
+<p>These five are entangled. Declaring any of them &mdash; and <code>= delete</code> counts as
+declaring &mdash; changes what the compiler generates for the rest. Nothing warns you.</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>You declare</th><th>Compiler stops generating</th><th>How you find out</th></tr>
+<tr><td>Any constructor, including <code>= delete</code></td><td>The default constructor</td><td><code>error: no matching constructor</code> on <code>Vector v;</code></td></tr>
+<tr><td>A destructor</td><td>Both move operations</td><td>You do not. Every move becomes a copy.</td></tr>
+<tr><td>A copy constructor</td><td>Both moves, and the default constructor</td><td>Half at compile time, half never</td></tr>
+<tr><td>A move operation</td><td>Both copy operations (they are <code>= delete</code>d)</td><td><code>error: call to deleted constructor</code></td></tr>
+</table>
+</div>
+
+<p>Hence <code>Vector() = default;</code> next to any <code>= delete</code>d copy constructor: it
+asks back for the zero-argument constructor that declaring the other one removed.</p>
+
+<div class="aside">
+  <span class="label">The trap in row two above</span>
+  Writing a destructor <em>suppresses</em> the generated move operations, and the copy operations
+  are still generated but deprecated. So adding <code>~Vector()</code> to a class silently changes
+  what every move in your program does. Nothing warns you. This is the mechanical reason the Rule of
+  Three became the Rule of Five.
+</div>
+
+<h2>3. What each one has to do</h2>
+
+<h3>Destructor &mdash; release, once</h3>
+<pre><code>~Vector() { delete[] m_data; }</code></pre>
+<p><code>delete[]</code> on <code>nullptr</code> is defined and does nothing, so a
+default-constructed <code>Vector</code> needs no special case. Pair <code>new[]</code> with
+<code>delete[]</code>; crossing them with plain <code>delete</code> is undefined behaviour, not a
+warning.</p>
+
+<h3>Copy constructor &mdash; allocate your own, then copy the values</h3>
+<pre><code>Vector(const Vector&amp; other)
+    : m_data(new int[other.m_capacity]),
+      m_size(other.m_size),
+      m_capacity(other.m_capacity)
+{
+    for (std::size_t i = 0; i &lt; m_size; ++i)
+        m_data[i] = other.m_data[i];
+}</code></pre>
+<p>This is a <strong>deep copy</strong>: a second buffer, holding equal values. The default is a
+<strong>shallow copy</strong>: one buffer, two pointers. Copy <code>m_size</code> elements, not
+<code>m_capacity</code> &mdash; the slots past <code>m_size</code> were never written, and reading
+them is undefined behaviour even to copy them.</p>
+
+<h3>Copy assignment &mdash; guard, release, allocate, copy, return</h3>
+<pre><code>Vector&amp; operator=(const Vector&amp; other) {
+    if (this == &amp;other) return *this;      // 1. self-assignment guard
+
+    int* fresh = new int[other.m_capacity]; // 2. allocate BEFORE releasing
+    for (std::size_t i = 0; i &lt; other.m_size; ++i)
+        fresh[i] = other.m_data[i];
+
+    delete[] m_data;                        // 3. now release the old
+    m_data = fresh;                         // 4. adopt
+    m_size = other.m_size;
+    m_capacity = other.m_capacity;
+    return *this;                           // 5. always, for chaining
+}</code></pre>
+<p>Two things it is easy to get wrong. <strong>Self-assignment</strong>: without the guard,
+<code>v = v</code> frees the buffer and then copies out of it. <strong>Order</strong>: allocating
+before releasing means that if <code>new</code> throws, the object is still intact rather than
+holding a dangling pointer.</p>
+
+<h3>Move constructor &mdash; steal, then blank the source</h3>
+<pre><code>Vector(Vector&amp;&amp; other) noexcept
+    : m_data(other.m_data), m_size(other.m_size), m_capacity(other.m_capacity)
+{
+    other.m_data = nullptr;     // essential
+    other.m_size = 0;
+    other.m_capacity = 0;
+}</code></pre>
+<p>A move is a copy of the three members plus one obligation: leave the source in a state that is
+<strong>valid and safely destructible</strong>. Setting <code>other.m_data = nullptr</code> is what
+stops the source&rsquo;s destructor from freeing the buffer you just took. Forget it and you have
+the same double free by a different route.</p>
+<p><code>noexcept</code> is not decoration. <code>std::vector</code> will refuse to use your move
+constructor when reallocating unless it is marked <code>noexcept</code>, and will copy instead.</p>
+
+<h3>Move assignment &mdash; guard, release, steal, blank</h3>
+<pre><code>Vector&amp; operator=(Vector&amp;&amp; other) noexcept {
+    if (this == &amp;other) return *this;
+    delete[] m_data;                 // release what we currently hold
+    m_data = other.m_data;           // steal
+    m_size = other.m_size;
+    m_capacity = other.m_capacity;
+    other.m_data = nullptr;          // blank the source
+    other.m_size = 0;
+    other.m_capacity = 0;
+    return *this;
+}</code></pre>
+
+<h2>4. Copy versus move, in one line</h2>
+
+<div class="table-wrap">
+<table>
+<tr><th></th><th>Copy</th><th>Move</th></tr>
+<tr><td>Buffers afterwards</td><td>Two</td><td>One</td></tr>
+<tr><td>Cost</td><td>Proportional to size</td><td>Constant &mdash; three assignments</td></tr>
+<tr><td>Source afterwards</td><td>Unchanged</td><td>Valid but empty; do not read its values</td></tr>
+<tr><td>Chosen for</td><td>An lvalue: a named object</td><td>An rvalue: a temporary, or <code>std::move(x)</code></td></tr>
+</table>
+</div>
+
+<p><code>std::move</code> moves nothing. It is a cast that says &ldquo;treat this named object as a
+temporary&rdquo;, which is what lets overload resolution pick the move version. After
+<code>std::move(a)</code>, <code>a</code> still exists and still gets destroyed &mdash; which is
+exactly why the move must leave it destructible.</p>
+
+<h2>5. The stopgap: <code>= delete</code></h2>
+
+<pre><code>Vector() = default;                        // required - see section 2
+Vector(const Vector&amp;) = delete;
+Vector&amp; operator=(const Vector&amp;) = delete;</code></pre>
+
+<p>Makes the operation a <strong>compile error</strong> rather than a broken runtime behaviour. Use
+it when a type genuinely should not be copied (<code>std::unique_ptr</code> is defined this way), or
+as a deliberate placeholder while the real version is unwritten. Either way it satisfies the rule:
+&ldquo;define or <code>=delete</code> them all.&rdquo;</p>
+
+<h2>6. Triage &mdash; symptom to cause</h2>
+
+<div class="table-wrap">
+<table>
+<tr><th>What you see</th><th>Most likely missing</th></tr>
+<tr><td><code>leaks</code> reports a leak; ASan and both presets are silent</td><td>Destructor &mdash; or the object outlived the check, see record 0006</td></tr>
+<tr><td>ASan: <code>attempting double-free</code>, both stacks in <code>~Vector</code></td><td>Copy constructor (shallow copy)</td></tr>
+<tr><td>Exit code 133, no output at all</td><td>Same double free, seen from the <code>dev</code> build. Rebuild under <code>asan</code>.</td></tr>
+<tr><td>ASan: <code>heap-use-after-free</code> reading elements</td><td>Move that did not blank the source, or a copy after a move</td></tr>
+<tr><td>Writing to <code>b</code> changes <code>a</code></td><td>Copy constructor (shallow copy) &mdash; aliasing, before it ever crashes</td></tr>
+<tr><td><code>error: no matching constructor</code> on a plain <code>Vector v;</code></td><td><code>Vector() = default;</code> &mdash; you declared some other constructor</td></tr>
+<tr><td>A leak on assignment, not construction</td><td>Copy assignment &mdash; it overwrote a pointer without freeing</td></tr>
+<tr><td>Correct but slow; profile shows copying</td><td>Move operations &mdash; suppressed by your destructor, or not <code>noexcept</code></td></tr>
+</table>
+</div>
+
+<h2>7. What to say in review</h2>
+
+<ul>
+  <li><strong>Core Guidelines <a href="https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rc-five">C.21</a></strong>
+  &mdash; &ldquo;If you define or <code>=delete</code> any copy, move, or destructor function, define
+  or <code>=delete</code> them all.&rdquo; The reason is the one in section 2: writing one changes
+  what the compiler generates for the others.</li>
+  <li><strong><a href="https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rc-zero">C.20</a></strong>
+  &mdash; &ldquo;If you can avoid defining default operations, do.&rdquo; The Rule of Zero. The
+  defence for writing all five in Project 1 is that a container is precisely the exception: you are
+  implementing the ownership that everyone else gets to inherit.</li>
+  <li><strong><a href="https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rc-move-noexcept">C.66</a></strong>
+  &mdash; move operations should be <code>noexcept</code>.</li>
+</ul>
+
+<hr>
+<p class="lede">Related</p>
+<p><a href="./vector-internals.html">Vector internals</a> &mdash; size, capacity, growth, iterator
+invalidation. <a href="./toolchain.html">Toolchain</a> &mdash; the two presets, the third
+uninstrumented build for leak checking, and the error triage table.
+<a href="./glossary.html">Glossary</a>.
+<a href="../lessons/0006-the-destructor-and-raii.html">Lesson 6</a> is where the destructor and the
+double free were derived.</p>
+
+</body>
+</html>
