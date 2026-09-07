@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 7 &mdash; The Copy Constructor, and Deep Copy</title>
+<meta name="description" content="Replacing the = delete stopgap with a real copy: a second buffer, the two signatures that will not compile, and the measured truth about the self-assignment guard.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<link rel="stylesheet" href="../assets/quiz.css">
+</head>
+<body>
+
+<p class="kicker">Lesson 07 &middot; Weeks 1&ndash;2 &middot; Sep 2 checkpoint</p>
+<h1>The Copy Constructor, and Deep Copy</h1>
+<p class="standfirst">Lesson 6 ended with a stopgap: <code>Vector(const Vector&amp;) = delete;</code>,
+which turns a silent abort into a compile error. That was the right thing to commit at 11pm. It is
+not the right thing to hand in. This lesson replaces it with the real answer &mdash; and then shows
+you a bug in the standard version of that answer, measured on your machine, that no sanitizer you
+own can see.</p>
+
+<h2><span class="num">Knowledge 1</span>One buffer versus two</h2>
+
+<p>The crash in Lesson 6 was not really about destructors. It was about the word <em>copy</em>
+meaning two different things, and the compiler picking the wrong one.</p>
+
+<ul>
+  <li>A <strong>shallow copy</strong> duplicates the members. <code>m_data</code> is a pointer, so
+  duplicating it duplicates an <em>address</em>. One buffer, two owners, two frees.</li>
+  <li>A <strong>deep copy</strong> duplicates what the members <em>point at</em>. Two buffers,
+  holding equal values, each owned by exactly one object.</li>
+</ul>
+
+<p>The compiler-generated copy constructor always does the shallow one. It cannot do otherwise: it
+knows <code>m_data</code> is an <code>int*</code>, but nothing in the type says whether that pointer
+<em>owns</em> the memory or merely <em>refers</em> to memory somebody else owns. Both are legal and
+common. Ownership is a fact about your design, not about the type, so it is your job to state it
+&mdash; and the way you state it is by writing these functions.</p>
+
+<figure>
+<svg viewBox="0 0 620 172" role="img" aria-label="Left: shallow copy, objects a and b hold the same address and point at one shared buffer, marked as the Lesson 6 crash. Right: deep copy, a and b hold different addresses pointing at two separate buffers holding equal values.">
+  <text class="svg-mono svg-faint" x="14" y="16" font-size="9">SHALLOW &mdash; what the compiler wrote</text>
+
+  <rect class="svg-box" x="14" y="26" width="106" height="34" rx="3"/>
+  <text class="svg-mono svg-soft" x="22" y="22" font-size="8.5">a</text>
+  <text class="svg-mono svg-ink" x="22" y="47" font-size="9">m_data = 0x…1c00</text>
+
+  <rect class="svg-box" x="14" y="88" width="106" height="34" rx="3"/>
+  <text class="svg-mono svg-soft" x="22" y="84" font-size="8.5">b</text>
+  <text class="svg-mono svg-ink" x="22" y="109" font-size="9">m_data = 0x…1c00</text>
+
+  <path class="svg-stroke" d="M120 43 H196" stroke-width="1"/>
+  <path class="svg-stroke" d="M188 38 l8 5 -8 5" stroke-width="1"/>
+  <path class="svg-stroke" d="M120 105 H160 V55 H196" stroke-width="1"/>
+  <path class="svg-stroke" d="M188 50 l8 5 -8 5" stroke-width="1"/>
+
+  <rect class="svg-box" x="196" y="26" width="90" height="34" rx="3"/>
+  <text class="svg-mono svg-ink" x="206" y="47" font-size="9">0 10 20 30 40</text>
+  <text class="svg-mono svg-accent" x="196" y="80" font-size="8.5">one buffer, two frees</text>
+  <text class="svg-mono svg-faint" x="196" y="96" font-size="8.5">write b[0], and a[0] changes</text>
+  <text class="svg-mono svg-faint" x="196" y="112" font-size="8.5">this is Lesson 6&rsquo;s exit 133</text>
+
+  <path class="svg-rule" d="M310 14 V158"/>
+
+  <text class="svg-mono svg-faint" x="326" y="16" font-size="9">DEEP &mdash; what you are about to write</text>
+
+  <rect class="svg-box" x="326" y="26" width="106" height="34" rx="3"/>
+  <text class="svg-mono svg-soft" x="334" y="22" font-size="8.5">a</text>
+  <text class="svg-mono svg-ink" x="334" y="47" font-size="9">m_data = 0x…1c00</text>
+
+  <rect class="svg-box" x="326" y="88" width="106" height="34" rx="3"/>
+  <text class="svg-mono svg-soft" x="334" y="84" font-size="8.5">b</text>
+  <text class="svg-mono svg-ink" x="334" y="109" font-size="9">m_data = 0x…2e40</text>
+
+  <path class="svg-stroke" d="M432 43 H500" stroke-width="1"/>
+  <path class="svg-stroke" d="M492 38 l8 5 -8 5" stroke-width="1"/>
+  <path class="svg-stroke" d="M432 105 H500" stroke-width="1"/>
+  <path class="svg-stroke" d="M492 100 l8 5 -8 5" stroke-width="1"/>
+
+  <rect class="svg-box" x="500" y="26" width="90" height="34" rx="3"/>
+  <text class="svg-mono svg-ink" x="510" y="47" font-size="9">0 10 20 30 40</text>
+  <rect class="svg-box" x="500" y="88" width="90" height="34" rx="3"/>
+  <text class="svg-mono svg-ink" x="510" y="109" font-size="9">0 10 20 30 40</text>
+  <text class="svg-mono svg-faint" x="500" y="140" font-size="8.5">equal values, separate memory</text>
+  <text class="svg-mono svg-faint" x="500" y="156" font-size="8.5">one owner each, one free each</text>
+</svg>
+<figcaption>Same source line, <code>Vector b = a;</code>, either side. The only difference is whether
+<code>b</code> got its own <code>new int[]</code>.</figcaption>
+</figure>
+
+<h2><span class="num">Knowledge 2</span>The signature, and the two ways to get it wrong</h2>
+
+<p>A copy constructor is a constructor whose one parameter is a reference to its own type:</p>
+
+<pre><code>Vector(const Vector&amp; other)</code></pre>
+
+<p>Both halves of that parameter are load-bearing, and both failures are compile errors you can
+produce on purpose in ten seconds. Do produce them &mdash; an error you have seen once costs a
+minute later, and an error you have never seen costs an afternoon.</p>
+
+<p><strong>Take it by reference, not by value.</strong> <code>Vector(Vector other)</code> would mean
+&ldquo;to copy a <code>Vector</code>, first copy a <code>Vector</code> into the parameter&rdquo;
+&mdash; infinite recursion, before the body ever runs. The compiler refuses outright rather than
+letting you write it:</p>
+
+<pre><code>vector.hpp:59:23: error: copy constructor must pass its first argument by reference
+   59 |         Vector(Vector other)
+      |                       ^
+      |                       const &amp;</code></pre>
+
+<p><strong>Take it by <code>const</code> reference.</strong> Dropping the <code>const</code> compiles
+&mdash; and that is the trap, because <code>Vector b = a;</code> keeps working. It breaks later, the
+first time you copy something you promised not to modify, which in practice is the first time you
+pass a <code>Vector</code> to a function as <code>const Vector&amp;</code>:</p>
+
+<pre><code>error: no matching constructor for initialization of 'containers::Vector'
+    2 | containers::Vector duplicate(const containers::Vector &amp;v) { containers::Vector copy = v; ...
+      |                                                                                ^      ~
+note: candidate constructor not viable: 1st argument ('const containers::Vector')
+      would lose const qualifier
+   59 |         Vector(Vector &amp;other)</code></pre>
+
+<p>Copying does not modify the source, so promise that in the signature. That promise is what lets
+callers hand you a <code>const</code> object at all.</p>
+
+<div class="aside">
+  <span class="label">One member you must not copy blindly</span>
+  <p>Copy <code>m_size</code> elements, not <code>m_capacity</code>. The slots between
+  <code>m_size</code> and <code>m_capacity</code> were allocated but never written &mdash;
+  <code>new int[8]</code> leaves them uninitialized, and <em>reading</em> an uninitialized
+  <code>int</code> is undefined behaviour, even if all you do with the value is copy it somewhere
+  else. The new buffer&rsquo;s tail is uninitialized too, which is fine: nothing is allowed to read
+  past <code>m_size</code> either.</p>
+</div>
+
+<h2><span class="num">Build 1</span>The copy constructor</h2>
+
+<p>In <code>include/containers/vector.hpp</code>, delete the line
+<code>Vector(const Vector &amp;) = delete;</code> and put this in its place. Leave the copy
+<em>assignment</em> <code>= delete</code> alone for one more minute &mdash; it is the next build
+step, and the two are different jobs.</p>
+
+<p class="filename">include/containers/vector.hpp &mdash; below <code>~Vector()</code></p>
+<pre><code>        // Copy constructor: build a NEW Vector that duplicates other.
+        // Called by `Vector b = a;` and whenever a Vector is passed or returned by value.
+        // There is no existing buffer to release here - this object does not exist yet.
+        Vector(const Vector &amp;other)
+            : m_data(new int[other.m_capacity]),   // our own buffer, same capacity
+              m_size(other.m_size),
+              m_capacity(other.m_capacity)
+        {
+            // Copy the live elements only. Slots past m_size were never written,
+            // and reading uninitialized ints is UB even just to copy them.
+            for (std::size_t i = 0; i &lt; m_size; ++i)
+                m_data[i] = other.m_data[i];
+        }</code></pre>
+
+<p>The <code>: m_data(...), m_size(...)</code> part before the body is a <strong>member
+initializer list</strong>. It initializes each member directly, in the order the members are
+<em>declared</em> in the class &mdash; not the order you write them here. Getting those two orders
+out of sync is the classic source of a member being read before it is set, and
+<code>-Wall</code> (which your presets already carry as <code>-Werror</code>) warns about it. Yours
+match: <code>m_data</code>, <code>m_size</code>, <code>m_capacity</code>.</p>
+
+<p>Now exercise it. In <code>tests/main.cpp</code>, the three lines from Lesson 6 that used to
+abort:</p>
+
+<pre><code>containers::Vector b = a;    // copy constructor
+b[0] = 999;
+std::cout &lt;&lt; "a[0] = " &lt;&lt; a[0] &lt;&lt; "   b[0] = " &lt;&lt; b[0] &lt;&lt; "\n";</code></pre>
+
+<pre><code>$ ./build/asan/tests
+a[0] = 0   b[0] = 999</code></pre>
+
+<p><code>a</code> did not move. That one line of output is the whole lesson: last time it read
+<code>a[0] = 999</code> and then the process died. Two buffers now, and the aliasing is gone with
+the crash.</p>
+
+<h2><span class="num">Knowledge 3</span>Assignment is a different job</h2>
+
+<p>These two lines look like the same operation and are not:</p>
+
+<pre><code>containers::Vector b = a;   // construction  - calls the copy CONSTRUCTOR
+c = a;                      // assignment    - calls copy ASSIGNMENT</code></pre>
+
+<p>The <code>=</code> in the first line is not assignment at all; it is initialization syntax for an
+object that does not exist yet. The distinction is not pedantry, because it changes the work
+required. The copy constructor starts from nothing, so it only has to acquire. Copy assignment
+starts from a <code>c</code> that is already alive and <strong>already owns a buffer</strong>. If it
+only acquires, the old buffer leaks.</p>
+
+<p>So assignment has five steps where construction had one:</p>
+
+<pre><code>Vector&amp; operator=(const Vector&amp; other) {
+    if (this == &amp;other) return *this;       // 1. self-assignment early-out
+    int* fresh = new int[other.m_capacity];  // 2. allocate BEFORE releasing
+    for (std::size_t i = 0; i &lt; other.m_size; ++i)
+        fresh[i] = other.m_data[i];          // 3. copy into the new buffer
+    delete[] m_data;                         // 4. only now release the old
+    m_data = fresh; m_size = other.m_size; m_capacity = other.m_capacity;
+    return *this;                            // 5. always, for chaining
+}</code></pre>
+
+<p>Three things worth naming:</p>
+
+<ul>
+  <li><code>this</code> is a pointer to the object the member function was called on. It is how a
+  member function refers to itself, and <code>*this</code> is the object.</li>
+  <li>Returning <code>Vector&amp;</code> is what makes <code>x = y = z</code> work, and matches what
+  every built-in type does. Returning by value would copy again for nothing.</li>
+  <li><strong>Allocate before you release.</strong> If <code>new</code> throws &mdash; and it can,
+  <code>std::bad_alloc</code> &mdash; the object still holds its original, intact buffer. Free
+  first and a throw leaves you holding a dangling pointer, in an object whose destructor is still
+  going to run.</li>
+</ul>
+
+<h2><span class="num">Build 2</span>Copy assignment, and a test you cannot write</h2>
+
+<p>Replace <code>Vector &amp;operator=(const Vector &amp;) = delete;</code> with the real one, and
+delete the now-stale comment above the pair. Then exercise it &mdash; note that <code>c</code> must
+already own a buffer, or you are not testing the interesting half:</p>
+
+<pre><code>containers::Vector c;
+c.push_back(7);              // c now owns a 1-element buffer of its own
+c = a;                       // copy assignment: that buffer must be released
+std::cout &lt;&lt; "c[0] = " &lt;&lt; c[0] &lt;&lt; "  size " &lt;&lt; c.size()
+          &lt;&lt; "  cap " &lt;&lt; c.capacity() &lt;&lt; "\n";</code></pre>
+
+<pre><code>$ ./build/asan/tests
+a[0] = 0   b[0] = 999
+c[0] = 0  size 5  cap 8</code></pre>
+
+<p>Then test self-assignment &mdash; and here your own build settings stop you:</p>
+
+<pre><code>$ ./build/dev/tests
+main.cpp:18:7: error: explicitly assigning value of variable of type 'containers::Vector'
+               to itself [-Werror,-Wself-assign-overloaded]
+   18 |     c = c;
+      |     ~ ^ ~</code></pre>
+
+<p>That is <em>your</em> <code>-Werror</code> from Lesson 2 firing, correctly: literal
+<code>c = c;</code> in real code is always a mistake, so clang refuses it. Write the test through a
+reference, which is also how self-assignment actually reaches you in production &mdash; two names
+for one object, arrived at through parameters:</p>
+
+<pre><code>containers::Vector &amp;alias = c;
+c = alias;                   // self-assignment, invisible to the compiler
+std::cout &lt;&lt; "after self-assign c[3] = " &lt;&lt; c[3] &lt;&lt; "\n";   // 30</code></pre>
+
+<p>Then all three builds, because by now you know that no one of them is a proxy for
+&ldquo;clean&rdquo;:</p>
+
+<pre><code>$ ./build/dev/tests                 # UBSan
+a[0] = 0   b[0] = 999
+c[0] = 0  size 5  cap 8
+after self-assign c[3] = 30
+
+$ ./build/asan/tests                # AddressSanitizer - no report
+$ /usr/bin/clang++ -std=c++20 -g -Iinclude tests/main.cpp -o /tmp/leakcheck
+$ MallocStackLogging=1 leaks -atExit -- /tmp/leakcheck
+Process 25119: 0 leaks for 0 total leaked bytes.</code></pre>
+
+<p>Three copies alive, three buffers, three destructors, zero leaked bytes. Commit this: it is the
+ownership half of the Sep 2 deliverable.</p>
+
+<h2><span class="num">Knowledge 4</span>What the guard actually buys &mdash; measured</h2>
+
+<p>Every textbook opens copy assignment with the self-assignment guard, and the usual justification
+is: <em>without it, <code>v = v</code> frees the buffer and then copies out of the memory it just
+freed.</em> That reasoning describes a different function than the one above. It is worth
+seeing why, because it is the difference between memorizing a ritual and knowing a mechanism.</p>
+
+<p>Both variants were built and run on this machine today. Same test, same compilers:</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>Ordering</th><th>Guard</th><th><code>c[3]</code> after self-assign</th><th>Sanitizers</th></tr>
+<tr><td>allocate &rarr; copy &rarr; release</td><td>yes</td><td><code>30</code> &mdash; correct</td><td>silent</td></tr>
+<tr><td>allocate &rarr; copy &rarr; release</td><td><strong>no</strong></td><td><code>30</code> &mdash; correct</td><td>silent</td></tr>
+<tr><td><strong>release &rarr; allocate &rarr; copy</strong></td><td>yes</td><td><code>30</code> &mdash; correct</td><td>silent</td></tr>
+<tr><td><strong>release &rarr; allocate &rarr; copy</strong></td><td><strong>no</strong></td><td><code>-1094795586</code></td><td><strong>silent</strong></td></tr>
+</table>
+</div>
+
+<p>Read the middle two rows together and the real rule appears: <strong>the ordering is the fix, and
+the guard is an optimization.</strong> Allocate-before-release makes self-assignment correct on its
+own, because at the moment you copy, the source buffer has not been touched. The guard's job is to
+skip a pointless allocate-and-copy of an object onto itself &mdash; worth having, not what is
+holding the function up. Reverse the ordering and the guard becomes the only thing standing between
+you and row four.</p>
+
+<p>Row four is the one to look at hardest. <code>-1094795586</code> is <code>0xBEBEBEBE</code>,
+AddressSanitizer&rsquo;s fill pattern for freshly allocated memory. That is the tell: after
+<code>delete[] m_data</code>, the loop copies from <code>other.m_data</code> &mdash; but
+<code>other</code> <em>is</em> <code>*this</code>, so <code>other.m_data</code> now names the
+<em>new</em> buffer, and the function copies uninitialized memory onto itself. Your data is gone and
+the program keeps running.</p>
+
+<div class="aside">
+  <span class="label">Why nothing caught it</span>
+  <p>Not a use-after-free &mdash; the read is from the new buffer, which is live. ASan tracks memory
+  that is freed or out of bounds; this is neither. Reading uninitialized memory is a different
+  detector (MemorySanitizer), which does not exist on Darwin/arm64. UBSan does not cover it. It
+  leaks nothing.</p>
+  <p>So add a fourth line to the triage table from record 0007: <code>dev</code> is silent on heap
+  corruption, <code>asan</code> is silent on leaks, and <strong>all three builds are silent on
+  reading uninitialized memory</strong>. The only detector for that class is an assertion in a
+  test &mdash; which is the argument for writing the checks in <code>tests/main.cpp</code> as
+  something that fails loudly rather than something you read with your eyes.</p>
+</div>
+
+<h2><span class="num">Skill</span>Retrieval</h2>
+
+<div class="quiz" data-quiz data-title="Check yourself">
+  <ol class="quiz-items">
+    <li class="quiz-q" data-answer="3" data-explain="Vector b = a; is initialization of an object that does not exist yet, so it calls the copy constructor. Only c = a, assigning to an object already alive, calls copy assignment.">
+      <p class="quiz-prompt">Which function does <code>Vector b = a;</code> call?</p>
+      <ul class="quiz-options">
+        <li>The copy assignment operator</li>
+        <li>The default constructor first</li>
+        <li>The copy constructor, always</li>
+        <li>Neither, the compiler elides</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="2" data-explain="Copy assignment starts from an object that is already alive and already owns a buffer. Failing to release it leaks. The copy constructor has no old buffer, because the object did not exist a moment ago.">
+      <p class="quiz-prompt">What must assignment do that construction need not?</p>
+      <ul class="quiz-options">
+        <li>Copy every element across</li>
+        <li>Release the buffer already held</li>
+        <li>Allocate a brand new buffer</li>
+        <li>Promise not to modify other</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="4" data-explain="Passing by value would require copying a Vector into the parameter, which requires the copy constructor, which requires copying a Vector. The compiler rejects the declaration outright.">
+      <p class="quiz-prompt">Why must the parameter be a reference, not a value?</p>
+      <ul class="quiz-options">
+        <li>References are cheaper to pass</li>
+        <li>Values cannot be marked const</li>
+        <li>The buffer would be shared</li>
+        <li>Copying it would call itself</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="1" data-explain="Measured today: with allocate-copy-release ordering, self-assignment is already correct without any guard, because the source buffer is untouched when the copy happens. Reverse the ordering and the guard is load-bearing.">
+      <p class="quiz-prompt">Allocating before releasing makes the guard into what?</p>
+      <ul class="quiz-options">
+        <li>An optimization, not a fix</li>
+        <li>A required correctness check</li>
+        <li>A guard against leaked bytes</li>
+        <li>An error under -Werror rules</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="2" data-explain="Only m_size elements have ever been written. The slots between m_size and m_capacity are uninitialized, and reading an uninitialized int is undefined behaviour even if the value is only copied elsewhere.">
+      <p class="quiz-prompt">How many elements does the copy loop read?</p>
+      <ul class="quiz-options">
+        <li>Exactly m_capacity elements</li>
+        <li>Exactly m_size elements</li>
+        <li>Capacity minus size elements</li>
+        <li>Whichever of them is larger</li>
+      </ul>
+    </li>
+  </ol>
+</div>
+
+<div class="recall" data-recall>
+  <p class="recall-front">Out loud: name the five steps of copy assignment in order, and say which
+  one the copy constructor does not need and why.</p>
+  <p class="recall-back">Guard against self-assignment; allocate the new buffer; copy the elements
+  into it; release the old buffer; assign the members and return <code>*this</code>. The copy
+  constructor skips the release, because the object it is building did not exist a moment ago and
+  therefore owns nothing yet.</p>
+</div>
+
+<div class="source">
+  <p><strong>Watch this one first.</strong> Cherno builds a <code>String</code>, hits your exact
+  double free, and writes the deep copy &mdash; the same bug you are holding, in a different class.
+  Then read learncpp for the style you will actually be graded on.</p>
+
+  <div class="table-wrap">
+  <table>
+  <tr><th>This lesson</th><th>Read (learncpp)</th><th>Watch (The Cherno)</th></tr>
+  <tr>
+    <td>Knowledge 1 &mdash; shallow vs deep</td>
+    <td><a href="https://www.learncpp.com/cpp-tutorial/shallow-vs-deep-copying/">Shallow vs deep copying</a></td>
+    <td rowspan="2"><a href="https://www.youtube.com/watch?v=BvR1Pgzzr38">Copying and Copy Constructors in C++</a></td>
+  </tr>
+  <tr>
+    <td>Knowledge 2 &mdash; the signature</td>
+    <td><a href="https://www.learncpp.com/cpp-tutorial/introduction-to-the-copy-constructor/">Introduction to the copy constructor</a></td>
+  </tr>
+  <tr>
+    <td>Knowledge 3 &mdash; copy assignment</td>
+    <td><a href="https://www.learncpp.com/cpp-tutorial/overloading-the-assignment-operator/">Overloading the assignment operator</a></td>
+    <td>&mdash;</td>
+  </tr>
+  <tr>
+    <td>The authority to cite in review</td>
+    <td colspan="2"><a href="https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rc-copy-semantic">Core Guidelines C.61</a> &mdash; a copy operation should be independent: after <code>b = a</code>, modifying <code>b</code> must not change <code>a</code>. Also <a href="https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rc-copy-assign">C.60</a> on returning <code>Vector&amp;</code>.</td>
+  </tr>
+  </table>
+  </div>
+
+  <p>The learncpp assignment-operator chapter covers the self-assignment guard the traditional way,
+  as mandatory. Knowledge 4 above is the measured version on your ordering &mdash; read the chapter,
+  then be able to say which of the two claims is about which ordering. That is a good thing to have
+  straight before a code review.</p>
+</div>
+
+<footer>
+  <h2>Where this sits</h2>
+  <p>Before: <a href="./0006-the-destructor-and-raii.html">Lesson 6 &mdash; The Destructor, and the
+  Bug It Creates</a>, which planted the double free and the <code>= delete</code> stopgap this
+  lesson removes.</p>
+  <p>Reference: <a href="../reference/ownership.html">Ownership and the Rule of Five</a> &mdash; you
+  have now written three of the five. <a href="../reference/vector-internals.html">Vector
+  internals</a> for size and capacity. <a href="../reference/toolchain.html">Toolchain</a> for the
+  leak-check build.</p>
+  <p>Next: <strong>move semantics</strong> &mdash; the last two of the five, and the reason your
+  destructor silently switched every move in the program back to a copy. Same five members, one new
+  obligation: blank the source so its destructor has nothing left to free.</p>
+  <p class="ask">Ask me anything here that did not land. The two that usually need a second pass are
+  why the member initializer list runs in declaration order rather than written order, and why
+  row four of the table above is not something AddressSanitizer can be configured to catch.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

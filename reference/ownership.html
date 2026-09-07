@@ -147,10 +147,15 @@ them is undefined behaviour even to copy them.</p>
     m_capacity = other.m_capacity;
     return *this;                           // 5. always, for chaining
 }</code></pre>
-<p>Two things it is easy to get wrong. <strong>Self-assignment</strong>: without the guard,
-<code>v = v</code> frees the buffer and then copies out of it. <strong>Order</strong>: allocating
-before releasing means that if <code>new</code> throws, the object is still intact rather than
-holding a dangling pointer.</p>
+<p><strong>Order is the correctness requirement.</strong> Allocating before releasing means that
+if <code>new</code> throws, the object still holds its original intact buffer rather than a dangling
+pointer &mdash; and it also makes <code>v = v</code> correct on its own, because the source buffer is
+untouched when the copy runs. <strong>The guard is an optimization</strong>, skipping a pointless
+allocate-and-copy of an object onto itself. Keep it; do not mistake it for the fix. Reverse the two
+and the guard becomes load-bearing: release-first without it copies uninitialized memory onto itself
+and <em>no sanitizer on this machine reports it</em>. Measured both ways in
+<a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0008-the-ordering-is-the-fix-not-the-self-assignment-guard.md">record
+0008</a>.</p>
 
 <h3>Move constructor &mdash; steal, then blank the source</h3>
 <pre><code>Vector(Vector&amp;&amp; other) noexcept
@@ -220,6 +225,7 @@ as a deliberate placeholder while the real version is unwritten. Either way it s
 <tr><td>Writing to <code>b</code> changes <code>a</code></td><td>Copy constructor (shallow copy) &mdash; aliasing, before it ever crashes</td></tr>
 <tr><td><code>error: no matching constructor</code> on a plain <code>Vector v;</code></td><td><code>Vector() = default;</code> &mdash; you declared some other constructor</td></tr>
 <tr><td>A leak on assignment, not construction</td><td>Copy assignment &mdash; it overwrote a pointer without freeing</td></tr>
+<tr><td>Values silently become garbage; every build exits 0</td><td>Copy assignment ordering &mdash; release before allocate on a self-assignment. No sanitizer on this machine detects it; record 0008</td></tr>
 <tr><td>Correct but slow; profile shows copying</td><td>Move operations &mdash; suppressed by your destructor, or not <code>noexcept</code></td></tr>
 </table>
 </div>
