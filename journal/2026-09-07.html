@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>7 Sep 2026 &mdash; Plan for a long day, two days out from the meeting</title>
+<meta name="description" content="The working tree exits 133 right now. Six blocks to take Vector from broken to finished, measured, and defensible on Wednesday.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<link rel="stylesheet" href="../assets/journal.css">
+</head>
+<body>
+
+<p class="kicker"><a href="./">Journal</a> &middot; Monday 7 September 2026 &middot; Weeks 3&ndash;4 &middot; Project 1</p>
+<h1>Plan for a long day, two days out from the meeting</h1>
+<div class="entry">
+
+<h2>Where I actually am, measured not guessed</h2>
+
+<p>Five days since the last commit. Before planning anything, the honest question is what the
+repository does <em>today</em>, so the first thing run this morning was the working tree as it
+stands:</p>
+
+<pre><code>$ cmake --build build/dev
+[100%] Built target tests
+
+$ ./build/dev/tests
+EXIT=133</code></pre>
+
+<p>No output at all. Not one line of the five <code>size</code>/<code>cap</code> prints, even
+though they run before anything goes wrong. This is exactly the failure recorded in
+<a href="../learning-records/0007-dev-preset-aborts-silently-on-heap-corruption.md">record 0007</a>:
+the process dies on <code>SIGTRAP</code> before <code>stdout</code> is flushed, so the program's own
+output disappears along with the crash.</p>
+
+<p>The cause is visible in the diff. <code>include/containers/vector.hpp</code> has a copy
+constructor now, uncommitted. It has no copy <em>assignment</em> operator &mdash; and
+<code>tests/main.cpp</code>, also uncommitted, already contains <code>c = a;</code>. So the compiler
+supplies the assignment, member by member, copying the <em>pointer</em>. Two objects, one buffer,
+two destructors. The double free from Lesson 6 is back, through the other door.</p>
+
+<p><strong>So I am not behind on understanding. I am behind on finishing.</strong> Lessons 1&ndash;7
+and eight learning records are done and hold up. The repo is one function short of the thing they
+describe, and that one function is the whole reason today's build is red.</p>
+
+<h2>What Wednesday actually needs</h2>
+
+<p>The meeting is not a quiz. It is a code review, and
+<a href="../MISSION.md">the mission</a> says what it is judged on: ownership and lifetime decisions,
+defended out loud, with measurements rather than vibes. That reframes the day. The winning position
+on Wednesday is <strong>a finished, measured <code>Vector</code></strong> &mdash; not a half-started
+<code>unordered_map</code> next to a broken one.</p>
+
+<p><code>unordered_map</code> is explicitly <em>not</em> today's work. Attempting it would produce
+two unfinished containers instead of one finished one, and nothing to defend.</p>
+
+<h2>The blocks</h2>
+
+<p>Six working blocks, about six hours, with the breaks written in because they are the part that
+gets skipped. Each block ends in a commit or a recorded measurement &mdash; something that survives
+being interrupted.</p>
+
+<h3><span class="num">Block 1</span>Close the copy &mdash; 45 min</h3>
+<p>Write <code>Vector &amp;operator=(const Vector &amp;other)</code> in
+<code>include/containers/vector.hpp</code>. Use the ordering established in
+<a href="../learning-records/0008-the-ordering-is-the-fix-not-the-self-assignment-guard.md">record
+0008</a> &mdash; <strong>allocate, copy, then release</strong> &mdash; and keep the self-assignment
+guard, remembering that on this ordering it is an optimization and not the correctness fix, which is
+the point worth being able to say out loud on Wednesday.</p>
+<pre><code>$ cmake --build build/dev &amp;&amp; ./build/dev/tests
+# expect: five size/cap lines, then a[0] = 0  b[0] = 999,
+#         then c[0] = 0, then after self-assign c[3] = 30</code></pre>
+<p>Green means commit, right then. <a href="../reference/ownership.html">Ownership sheet</a>
+section 3 has the signature.</p>
+
+<h3><span class="num">Block 2</span>Prove it under all three builds &mdash; 60 min</h3>
+<p>One green build is not a clean container. Records
+<a href="../learning-records/0005-asan-does-not-detect-leaks-on-macos.md">0005</a>,
+<a href="../learning-records/0006-ubsan-instrumentation-hides-leaks-from-leaks.md">0006</a> and
+0007 established that no single configuration sees everything. Run all three and write down the
+output verbatim:</p>
+<pre><code>$ cmake --build build/dev   &amp;&amp; ./build/dev/tests     # UBSan
+$ cmake --preset asan &amp;&amp; cmake --build build/asan
+$ ./build/asan/tests                                     # heap errors
+$ clang++ -std=c++20 -g -Iinclude tests/main.cpp -o /tmp/leakcheck
+$ leaks --atExit -- /tmp/leakcheck                        # leaks only</code></pre>
+<p>"0 leaks for 0 total leaked bytes" plus a clean ASan run is the sentence the deliverable is
+actually claiming. Paste all three into the journal entry tonight &mdash; that transcript is the
+strongest single thing to bring to the meeting.</p>
+
+<p class="aside">Break &mdash; 15 min. Away from the screen.</p>
+
+<h3><span class="num">Block 3</span>Move semantics &mdash; 90 min</h3>
+<p>The largest remaining gap between this <code>Vector</code> and one a working engineer reads as
+current. Copy is correct now but pays for a buffer it does not need when the source is about to
+die. Move constructor and move assignment: steal the pointer, null the source, and the destructor
+that follows becomes a no-op.</p>
+<p>Ask for <strong>Lesson 8</strong> at the start of this block &mdash; it is not written yet, and
+it should be written against the copy assignment committed in Block 1 rather than in advance of
+it.</p>
+
+<p class="aside">Break &mdash; 20 min. Lunch.</p>
+
+<h3><span class="num">Block 4</span>Make it a template &mdash; 75 min</h3>
+<p><code>Vector</code> becomes <code>Vector&lt;T&gt;</code>. The library is already header-only
+(<a href="../learning-records/0002-p1-build-shape-header-only-two-presets.md">record 0002</a>), so
+this is mostly mechanical &mdash; but it reopens the question record 0008 left open on purpose:
+whether the allocate-copy-release ordering still holds when <code>T</code> has a non-trivial copy
+assignment of its own. Test it with a <code>T</code> that is itself a <code>Vector&lt;int&gt;</code>.
+If the answer differs, that is a ninth learning record and a genuinely good thing to walk into a
+review holding.</p>
+
+<h3><span class="num">Block 5</span>Assertions, not eyeballs &mdash; 60 min</h3>
+<p>Every check in <code>tests/main.cpp</code> today is a <code>cout</code> line read by a human.
+Record 0008 found the case that makes this untenable: reading uninitialized memory is invisible to
+all three build configurations, so the <em>only</em> possible detector is a test that fails loudly.
+Wire up GoogleTest &mdash; the <code>CMakeLists.txt</code> comment already reserves the spot &mdash;
+or, if that fights back, a twenty-line <code>CHECK</code> macro that returns non-zero. Either beats
+reading numbers off a terminal.</p>
+
+<h3><span class="num">Block 6</span>Write the meeting one-pager &mdash; 45 min</h3>
+<p>Four headings, no more. <em>What shipped.</em> <em>What I measured</em> (the three transcripts
+from Block 2). <em>The three blind spots I found in my own toolchain</em> &mdash; leaks, silent
+aborts, uninitialized reads &mdash; which is the most interesting thing produced in four weeks and
+should not be left to come up by accident. <em>What is next and when</em>:
+<code>unordered_map</code>, with a date.</p>
+
+<h2>If the day runs short</h2>
+
+<p>Blocks 1, 2 and 6 are the ones that must happen. A committed, measured, documented
+<code>Vector</code> with copy semantics is a defensible deliverable on its own. Blocks 3&ndash;5 make
+it a better one. Cutting from the middle is fine; arriving Wednesday with the tree at exit 133 is
+not.</p>
+
+<p class="ask">Anything unclear in any block &mdash; the assignment signature, why the move
+constructor needs <code>noexcept</code>, how to wire GoogleTest &mdash; ask. That is what the
+teacher is for, and asking mid-block is faster than being stuck in one.</p>
+
+</div>
+</body>
+</html>

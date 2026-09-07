@@ -55,6 +55,12 @@ compiled and ran on my machine; the commands and their output are real, not illu
     <span class="note">Stack versus heap, and a forty-line Vector that grows &mdash; containing a deliberate leak to find with a tool.</span></li>
   <li><a href="./lessons/0006-the-destructor-and-raii.html">Lesson 6 &mdash; The Destructor, and the Bug It Creates</a>
     <span class="note">One function fixes the leak from Lesson 5 &mdash; and immediately turns a silent leak into a double free. RAII, and why the destructor is never the whole answer.</span></li>
+  <li><a href="./lessons/0007-the-copy-constructor-and-deep-copy.html">Lesson 7 &mdash; The Copy Constructor, and Deep Copy</a>
+    <span class="note">Replacing the = delete stopgap with a real copy: a second buffer, the two signatures that will not compile, and the measured truth about the self-assignment guard.</span></li>
+  <li><a href="./lessons/0008-move-semantics-and-the-noexcept-that-pays.html">Lesson 8 &mdash; Move Semantics, and the noexcept That Pays</a>
+    <span class="note">The destructor silently deleted both move operations, so every move is a copy. The last two of the five, with allocation counts measured on this machine.</span></li>
+  <li><a href="./lessons/0009-vector-t-and-the-bug-int-was-hiding.html">Lesson 9 &mdash; Vector&lt;T&gt;, and the Bug int Was Hiding</a>
+    <span class="note">Templating is mostly mechanical. What it is for is exposing a wasteful grow() that no Vector&lt;int&gt; test could ever have seen: 43 allocations down to 36.</span></li>
   <li><a href="./lessons/recall-01-weeks-1-2.html">Recall — Weeks 1&ndash;2</a>
     <span class="note">Interactive recall over weeks 1&ndash;2: the build pipeline, CMake, the heap, and the first Vector.</span></li>
 <!-- END:lessons -->
@@ -92,6 +98,7 @@ it. These are the ones where the answer was not in any tutorial.</p>
   <li><a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0005-asan-does-not-detect-leaks-on-macos.md">AddressSanitizer reports no leaks on macOS; <code>leaks</code> fills the gap</a></li>
   <li><a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0006-ubsan-instrumentation-hides-leaks-from-leaks.md"><code>-fsanitize=undefined</code> makes Apple's <code>leaks</code> report zero leaks</a></li>
   <li><a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0007-dev-preset-aborts-silently-on-heap-corruption.md">A heap-corruption abort under the <code>dev</code> preset prints nothing at all</a></li>
+  <li><a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0008-the-ordering-is-the-fix-not-the-self-assignment-guard.md">In copy assignment, the ordering is the fix; the self-assignment guard is an optimization</a></li>
 <!-- END:records -->
 </ul>
 
