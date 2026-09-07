@@ -39,7 +39,8 @@ style.** Where a video's syntax disagrees with learncpp, learncpp wins (per the 
 
   **Verified URLs** (titles confirmed against YouTube; runtimes not verified). Ordering is the
   watch order — each one pairs with the lesson beside it, and watching ahead of the lesson wastes
-  the video. Current position: Lesson 6 done, so start at *Copying and Copy Constructors*.
+  the video. Current position: Lesson 7 written, so *Copying and Copy Constructors* is the one to
+  watch now. Lesson 8 is the move pair.
   - [POINTERS in C++](https://www.youtube.com/watch?v=DTxHyVn0ODg) — Lesson 5. *Watched 25 Aug.*
   - [REFERENCES in C++](https://www.youtube.com/watch?v=IzoFn3dfsPA) — Lesson 5. *Watched 25 Aug.*
   - [Destructors in C++](https://www.youtube.com/watch?v=D8cWquReFqw) — Lesson 6. Short; optional
@@ -48,7 +49,10 @@ style.** Where a video's syntax disagrees with learncpp, learncpp wins (per the 
     — Lesson 6, the RAII half, drawn.
   - [Copying and Copy Constructors in C++](https://www.youtube.com/watch?v=BvR1Pgzzr38) —
     **Lesson 7, watch this first.** He builds a `String`, hits the shallow-copy double free, and
-    writes the deep copy. Exactly the bug sitting in `p1-containers` right now.
+    writes the deep copy. Exactly the bug sitting in `p1-containers` right now. Caveat now that
+    Lesson 7 is written: he does not cover copy *assignment*, only the constructor, and the
+    self-assignment guard he does not reach is the one place our measured answer differs from the
+    textbook — see learning record 0008.
   - [Move Semantics in C++](https://www.youtube.com/watch?v=ehMg6zvXuMY) — Lesson 8.
   - [std::move and the Move Assignment Operator in C++](https://www.youtube.com/watch?v=OWNeCTd7yQE)
     — Lesson 8. A pair with the previous one, in that order; both continue the same `String` class.

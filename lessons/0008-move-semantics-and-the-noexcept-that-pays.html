@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 8 &mdash; Move Semantics, and the noexcept That Pays</title>
+<meta name="description" content="Your destructor silently deleted both move operations, so every move in the program is a copy. Writing the last two of the five, with the allocation counts measured on this machine.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<link rel="stylesheet" href="../assets/quiz.css">
+</head>
+<body>
+
+<p class="kicker">Lesson 08 &middot; Weeks 3&ndash;4 &middot; Project 1</p>
+<h1>Move Semantics, and the <code>noexcept</code> That Pays</h1>
+<p class="standfirst">Lesson 7 made copying correct. This lesson is about the copies you should not
+be making at all. There is a bug in your <code>Vector</code> right now that produces no crash, no
+leak, and no sanitizer report &mdash; it just quietly allocates and copies a buffer every time you
+hand a <code>Vector</code> somewhere. You wrote it in Lesson 6, in one line, and nothing has warned
+you about it since.</p>
+
+<h2><span class="num">Knowledge 1</span>The bug your destructor introduced</h2>
+
+<p>Here is the measurement, run on your machine against the commit you pushed this morning. The
+probe counts every <code>new int[]</code> by replacing <code>operator new[]</code> globally, so the
+numbers are allocations of your buffer and nothing else:</p>
+
+<pre><code>after building a:            4 allocations   (1 -&gt; 2 -&gt; 4 -&gt; 8, doubling)
+Vector b = std::move(a):     <strong>1 allocation</strong>
+c = std::move(b):            <strong>1 allocation</strong></code></pre>
+
+<p>You asked for a move and paid for a copy. <code>std::move</code> is right there in the source and
+it allocated a buffer anyway. The reason is a rule from
+<a href="../reference/ownership.html">the ownership sheet</a> that has been true since Lesson 6 and
+has never once produced a diagnostic:</p>
+
+<p><strong>Declaring a destructor stops the compiler generating both move operations.</strong> Not
+&ldquo;makes them wrong&rdquo; &mdash; makes them <em>not exist</em>. And when a move operation does
+not exist, the call does not fail. Overload resolution falls back to the next thing that can accept
+an rvalue, which is <code>const Vector&amp;</code>, which is your copy constructor. The program stays
+correct and gets slower, forever, silently.</p>
+
+<p>This is the single most important entry in the Rule of Five table, because it is the only one
+with no error message attached. A missing destructor leaks and <code>leaks</code> tells you. A
+missing copy constructor double-frees and ASan tells you. A missing move constructor tells you
+nothing at all.</p>
+
+<h2><span class="num">Knowledge 2</span>What a move actually is</h2>
+
+<p>A copy answers: <em>make me a second one, and leave the original alone.</em> A move answers a
+different question: <em>the original is about to die &mdash; give me its buffer.</em></p>
+
+<p>That second question is answerable in four pointer assignments and no allocation. The whole
+operation is: take the source's pointer, then <strong>blank the source</strong> so its destructor
+has nothing left to free.</p>
+
+<figure>
+<svg viewBox="0 0 620 176" role="img" aria-label="Left: copy, a keeps its buffer and b allocates a second buffer holding equal values. Right: move, b takes a's pointer and a is left null, so only one buffer exists and one destructor frees it.">
+  <text class="svg-mono svg-faint" x="14" y="16" font-size="9">COPY &mdash; two buffers, one allocation</text>
+
+  <rect class="svg-box" x="14" y="26" width="104" height="32" rx="3"/>
+  <text class="svg-mono svg-soft" x="22" y="22" font-size="8.5">a</text>
+  <text class="svg-mono svg-ink" x="22" y="46" font-size="9">m_data = 0x…1c00</text>
+
+  <rect class="svg-box" x="14" y="86" width="104" height="32" rx="3"/>
+  <text class="svg-mono svg-soft" x="22" y="82" font-size="8.5">b</text>
+  <text class="svg-mono svg-ink" x="22" y="106" font-size="9">m_data = 0x…2e40</text>
+
+  <path class="svg-stroke" d="M118 42 H186" stroke-width="1"/>
+  <path class="svg-stroke" d="M178 37 l8 5 -8 5" stroke-width="1"/>
+  <path class="svg-stroke" d="M118 102 H186" stroke-width="1"/>
+  <path class="svg-stroke" d="M178 97 l8 5 -8 5" stroke-width="1"/>
+
+  <rect class="svg-box" x="186" y="26" width="86" height="32" rx="3"/>
+  <text class="svg-mono svg-ink" x="195" y="46" font-size="9">0 10 20 30 40</text>
+  <rect class="svg-box" x="186" y="86" width="86" height="32" rx="3"/>
+  <text class="svg-mono svg-ink" x="195" y="106" font-size="9">0 10 20 30 40</text>
+  <text class="svg-mono svg-accent" x="186" y="138" font-size="8.5">new int[8] + a copy loop</text>
+  <text class="svg-mono svg-faint" x="186" y="154" font-size="8.5">two frees, one each</text>
+
+  <path class="svg-rule" d="M304 14 V162"/>
+
+  <text class="svg-mono svg-faint" x="320" y="16" font-size="9">MOVE &mdash; one buffer, zero allocations</text>
+
+  <rect class="svg-box" x="320" y="26" width="104" height="32" rx="3"/>
+  <text class="svg-mono svg-soft" x="328" y="22" font-size="8.5">a &mdash; moved from</text>
+  <text class="svg-mono svg-faint" x="328" y="46" font-size="9">m_data = nullptr</text>
+
+  <rect class="svg-box" x="320" y="86" width="104" height="32" rx="3"/>
+  <text class="svg-mono svg-soft" x="328" y="82" font-size="8.5">b</text>
+  <text class="svg-mono svg-ink" x="328" y="106" font-size="9">m_data = 0x…1c00</text>
+
+  <path class="svg-stroke" d="M424 102 H492" stroke-width="1"/>
+  <path class="svg-stroke" d="M484 97 l8 5 -8 5" stroke-width="1"/>
+
+  <rect class="svg-box" x="492" y="86" width="86" height="32" rx="3"/>
+  <text class="svg-mono svg-ink" x="501" y="106" font-size="9">0 10 20 30 40</text>
+  <text class="svg-mono svg-faint" x="492" y="46" font-size="8.5">a points at nothing,</text>
+  <text class="svg-mono svg-faint" x="492" y="60" font-size="8.5">so ~a() frees nothing</text>
+  <text class="svg-mono svg-accent" x="492" y="138" font-size="8.5">the same buffer, renamed</text>
+  <text class="svg-mono svg-faint" x="492" y="154" font-size="8.5">one free, by b</text>
+</svg>
+<figcaption>The buffer never moves. Only the question of who is responsible for freeing it does.</figcaption>
+</figure>
+
+<div class="aside">
+  <span class="label"><code>std::move</code> does not move anything</span>
+  <p>It is a cast, and nothing else. <code>std::move(a)</code> produces an <em>rvalue reference</em>
+  to <code>a</code> &mdash; written <code>Vector&amp;&amp;</code> &mdash; which is a way of saying
+  &ldquo;you may treat this object as expendable.&rdquo; No code runs. All it does is change which
+  overload the compiler picks. If no <code>Vector&amp;&amp;</code> overload exists, the cast is
+  pointless and the copy runs, which is exactly the 1 allocation you measured above. The name is one
+  of the worst in the standard library; read it as <code>std::treat_as_expendable</code>.</p>
+</div>
+
+<h2><span class="num">Build 1</span>The move constructor</h2>
+
+<p>In <code>include/containers/vector.hpp</code>, below your copy assignment operator and still in
+the <code>public:</code> block &mdash; the five belong in one run:</p>
+
+<p class="filename">include/containers/vector.hpp</p>
+<pre><code>        // Move constructor: take other's buffer instead of duplicating it.
+        // Called by `Vector b = std::move(a);` and when a function returns a
+        // temporary. No allocation, no copy loop - just four pointer-sized writes.
+        Vector(Vector &amp;&amp;other) noexcept
+            : m_data(other.m_data),
+              m_size(other.m_size),
+              m_capacity(other.m_capacity)
+        {
+            // The half people forget. Without this, other still holds the address,
+            // and its destructor frees the buffer b is now using. Same double free
+            // as Lesson 6, arrived at from the opposite direction.
+            other.m_data = nullptr;
+            other.m_size = 0;
+            other.m_capacity = 0;
+        }</code></pre>
+
+<p>No <code>const</code> on the parameter, and that is the point: you are about to modify
+<code>other</code>. A move that leaves the source untouched is a copy.</p>
+
+<p>Note what makes the blanking safe rather than merely tidy. <code>delete[] nullptr</code> is
+defined by the standard to do nothing, so the moved-from object's destructor is already correct with
+no special case. That is the same guarantee your <code>grow()</code> has relied on since Lesson 5
+for the first allocation.</p>
+
+<h2><span class="num">Knowledge 3</span>What a moved-from object is allowed to be</h2>
+
+<p>After <code>Vector b = std::move(a);</code>, what is <code>a</code>? The standard's answer for
+its own types is <strong>valid but unspecified</strong>: you may destroy it, and you may assign a new
+value to it, but you may not assume what it contains.</p>
+
+<p>Yours is stronger than that, and deliberately so. Blanking to <code>nullptr</code>/<code>0</code>
+leaves a moved-from <code>Vector</code> indistinguishable from a default-constructed one, which
+means it is not just destructible but genuinely reusable. Measured:</p>
+
+<pre><code>moved-from a: size 0 cap 0
+after push_back: a[0] = 7 size 1        # a works again, from empty
+after self-move b: size 5               # b survived b = std::move(b)</code></pre>
+
+<p>Both lines under ASan and UBSan with no report, and <code>0 leaks for 0 total leaked bytes</code>
+on the third build. The empty state costs you nothing to provide and removes an entire category of
+question from your code review, so provide it.</p>
+
+<h2><span class="num">Build 2</span>Move assignment</h2>
+
+<p>Same relationship to the move constructor as copy assignment had to the copy constructor:
+<code>*this</code> is already alive and already owns a buffer, so there is a release to do first.</p>
+
+<p class="filename">include/containers/vector.hpp</p>
+<pre><code>        Vector &amp;operator=(Vector &amp;&amp;other) noexcept
+        {
+            if (this == &amp;other) return *this;   // self-move: without this, we free
+                                                 // our own buffer and then adopt it
+            delete[] m_data;                     // release what we hold
+            m_data = other.m_data;               // adopt theirs
+            m_size = other.m_size;
+            m_capacity = other.m_capacity;
+            other.m_data = nullptr;              // and blank them
+            other.m_size = 0;
+            other.m_capacity = 0;
+            return *this;
+        }</code></pre>
+
+<p>Read the guard here against
+<a href="../learning-records/0008-the-ordering-is-the-fix-not-the-self-assignment-guard.md">record
+0008</a>, because the conclusion flips. In <em>copy</em> assignment you measured that the guard is an
+optimization: allocate-before-release makes self-assignment correct on its own. In <em>move</em>
+assignment there is no allocation to reorder. Delete comes first because it must, so
+<code>b = std::move(b)</code> without the guard frees the buffer and then adopts the pointer to it
+&mdash; a genuine use-after-free. <strong>Here the guard is load-bearing.</strong> Same two words,
+opposite answers, and you can now say why for each.</p>
+
+<p>Now rerun the probe:</p>
+
+<pre><code>Vector b = std::move(a):     0 allocation(s)
+c = std::move(b):            0 allocation(s)</code></pre>
+
+<h2><span class="num">Knowledge 4</span>What <code>noexcept</code> buys &mdash; measured</h2>
+
+<p>Both signatures carry <code>noexcept</code>. It is not decoration, and the reason is worth having
+straight because it is a favourite review question.</p>
+
+<p><code>std::vector</code> reallocating has a problem: it must relocate your elements to a bigger
+buffer, and if relocation throws halfway through, the old buffer is already partly gutted and there
+is nothing to roll back to. Copying is safe here &mdash; the original is untouched until every copy
+has succeeded. So <code>std::vector</code> will only use your move constructor if you have promised
+it cannot throw. If you have not, it copies, and never mentions it.</p>
+
+<p>Eight <code>Vector</code>s of three elements pushed into a <code>std::vector&lt;Vector&gt;</code>,
+counting buffer allocations, identical source but for the keyword:</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>Move ops</th><th><code>is_nothrow_move_constructible</code></th><th>Allocations</th><th>What the extra ones are</th></tr>
+<tr><td>marked <code>noexcept</code></td><td><code>true</code></td><td><strong>24</strong></td><td>3 per Vector, building them. Nothing else.</td></tr>
+<tr><td>not marked</td><td><code>false</code></td><td><strong>31</strong></td><td>Same 24, plus 7 buffers copied during regrowth</td></tr>
+</table>
+</div>
+
+<p>The extra seven are exactly the 1 + 2 + 4 elements that <code>std::vector</code> relocates as it
+doubles from capacity 1 to 8. Both programs print <code>shelf[7][2] = 2</code>; both are correct;
+one does 30% more allocation because of a missing keyword. That is the shape of every performance
+bug you will meet in this project &mdash; not a wrong answer, a right answer bought too dearly.</p>
+
+<p>The rule to carry: <strong>a move operation that cannot throw must say so.</strong> Yours cannot
+throw &mdash; it copies pointers and integers and calls <code>delete[]</code>, and none of those
+allocate. Say so.</p>
+
+<h2><span class="num">Verify</span>All three builds</h2>
+
+<pre><code>$ cmake --build build/dev  &amp;&amp; ./build/dev/tests
+$ cmake --build build/asan &amp;&amp; ./build/asan/tests
+$ /usr/bin/clang++ -std=c++20 -g -isysroot $(xcrun --show-sdk-path) \
+      -Iinclude tests/main.cpp -o /tmp/leakcheck
+$ leaks --atExit -- /tmp/leakcheck</code></pre>
+
+<p>Add to <code>tests/main.cpp</code> before you run them: a move construction, a move assignment
+onto a vector that already owns a buffer, a <code>push_back</code> into a moved-from vector, and a
+self-move through a reference. The last two are the ones that find the missing <code>nullptr</code>
+blanking. Then commit &mdash; that is the Rule of Five complete.</p>
+
+<h2><span class="num">Skill</span>Retrieval</h2>
+
+<div class="quiz" data-quiz data-title="Check yourself">
+  <ol class="quiz-items">
+    <li class="quiz-q" data-answer="3" data-explain="Declaring a destructor suppresses generation of both move operations. Nothing warns you; overload resolution simply falls back to the copy constructor, which accepts an rvalue through const Vector&.">
+      <p class="quiz-prompt">Which member suppressed your two move operations?</p>
+      <ul class="quiz-options">
+        <li>The copy assignment operator</li>
+        <li>The default constructor</li>
+        <li>The destructor you wrote</li>
+        <li>The copy constructor</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="2" data-explain="std::move is purely a cast to Vector&&. It generates no instructions and touches no memory; it only changes which overload the compiler selects.">
+      <p class="quiz-prompt">What does <code>std::move(a)</code> do at runtime?</p>
+      <ul class="quiz-options">
+        <li>Frees the source object</li>
+        <li>Nothing, it only casts</li>
+        <li>Swaps the two buffers</li>
+        <li>Copies then clears it</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="4" data-explain="Without blanking, the source still holds the address, so its destructor frees the buffer the destination is now using. It is the Lesson 6 double free reached from the other direction.">
+      <p class="quiz-prompt">Why must a move blank the source pointer?</p>
+      <ul class="quiz-options">
+        <li>To make the size zero</li>
+        <li>To let it be reused</li>
+        <li>To silence the sanitizer</li>
+        <li>To stop a double free</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="1" data-explain="Move assignment must delete before adopting, so there is no ordering that saves you. Self-move without the guard frees the buffer and then adopts the pointer to it. In copy assignment, allocate-before-release made the guard optional.">
+      <p class="quiz-prompt">Where is the self-assignment guard actually load-bearing?</p>
+      <ul class="quiz-options">
+        <li>In move assignment only</li>
+        <li>In copy assignment only</li>
+        <li>In both of them equally</li>
+        <li>In neither, given ordering</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="3" data-explain="std::vector cannot roll back a half-finished relocation, so it only moves elements when the move constructor promises not to throw. Otherwise it copies, silently, and you pay an allocation per element per regrowth.">
+      <p class="quiz-prompt">What does <code>std::vector</code> do without <code>noexcept</code> moves?</p>
+      <ul class="quiz-options">
+        <li>Refuses to compile it</li>
+        <li>Moves them and hopes</li>
+        <li>Copies every element instead</li>
+        <li>Warns you at compile time</li>
+      </ul>
+    </li>
+  </ol>
+</div>
+
+<div class="recall" data-recall>
+  <p class="recall-front">Out loud: name all five special member functions, say which one you wrote
+  first, and say what writing it did to the other two.</p>
+  <p class="recall-back">Destructor, copy constructor, copy assignment, move constructor, move
+  assignment. The destructor came first, in Lesson 6 &mdash; and declaring it stopped the compiler
+  generating the move constructor and move assignment, so every move in the program silently became
+  a copy until Lesson 8.</p>
+</div>
+
+<div class="source">
+  <p><strong>Read this one first.</strong> learncpp's move chapter is the one to follow for style,
+  and it builds the same argument on the same shape of class.</p>
+
+  <div class="table-wrap">
+  <table>
+  <tr><th>This lesson</th><th>Read (learncpp)</th><th>Watch (The Cherno)</th></tr>
+  <tr>
+    <td>Knowledge 2 &mdash; rvalues and <code>std::move</code></td>
+    <td><a href="https://www.learncpp.com/cpp-tutorial/rvalue-references/">Rvalue references</a></td>
+    <td><a href="https://www.youtube.com/watch?v=ehMg6zvXuMY">lvalues and rvalues</a></td>
+  </tr>
+  <tr>
+    <td>Builds 1 and 2 &mdash; the two functions</td>
+    <td><a href="https://www.learncpp.com/cpp-tutorial/move-constructors-and-move-assignment/">Move constructors and move assignment</a></td>
+    <td><a href="https://www.youtube.com/watch?v=ehMg6zvXuMY">Move semantics in C++</a></td>
+  </tr>
+  <tr>
+    <td>Knowledge 3 &mdash; the moved-from state</td>
+    <td><a href="https://www.learncpp.com/cpp-tutorial/stdmove/">std::move</a></td>
+    <td>&mdash;</td>
+  </tr>
+  <tr>
+    <td>The authority to cite in review</td>
+    <td colspan="2"><a href="https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rc-move-noexcept">Core Guidelines C.66</a> &mdash; make move operations <code>noexcept</code>. Also <a href="https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rc-five">C.21</a>, the Rule of Five itself, and <a href="https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rc-move-semantic">C.64</a> on leaving the source in a valid state.</td>
+  </tr>
+  </table>
+  </div>
+
+  <p>Cherno covers lvalues/rvalues and move semantics across two videos and gets to the same
+  place; learncpp is closer to the style you will be graded on, so if you only do one, read.</p>
+</div>
+
+<footer>
+  <h2>Where this sits</h2>
+  <p>Before: <a href="./0007-the-copy-constructor-and-deep-copy.html">Lesson 7 &mdash; The Copy
+  Constructor, and Deep Copy</a>, which made copying correct. This lesson is about not doing it.</p>
+  <p>Reference: <a href="../reference/ownership.html">Ownership and the Rule of Five</a> &mdash;
+  after this you have written all five. <a href="../reference/vector-internals.html">Vector
+  internals</a>.</p>
+  <p>Next: <strong><code>Vector&lt;T&gt;</code></strong> &mdash; the template parameter, which
+  reopens the question record 0008 left deliberately open: whether the allocate-copy-release
+  ordering still holds when <code>T</code> has a non-trivial copy assignment of its own.</p>
+  <p class="ask">Ask me anything here that did not land. The two that usually need a second pass are
+  why <code>std::move</code> on a <code>const Vector&amp;</code> silently gives you a copy, and why
+  <code>std::vector</code> cannot simply catch the exception instead of demanding
+  <code>noexcept</code>.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>
