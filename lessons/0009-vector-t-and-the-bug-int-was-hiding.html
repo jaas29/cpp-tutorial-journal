@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 9 &mdash; Vector&lt;T&gt;, and the Bug int Was Hiding</title>
+<meta name="description" content="Templating the container is mostly mechanical. What it is really for is exposing a wasteful grow() that was invisible while T was int - measured, 43 allocations down to 36.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<link rel="stylesheet" href="../assets/quiz.css">
+</head>
+<body>
+
+<p class="kicker">Lesson 09 &middot; Weeks 3&ndash;4 &middot; Project 1</p>
+<h1><code>Vector&lt;T&gt;</code>, and the Bug <code>int</code> Was Hiding</h1>
+<p class="standfirst">The mechanical part of this lesson takes ten minutes: write
+<code>template &lt;typename T&gt;</code> and replace <code>int</code> with <code>T</code>. The reason
+it is worth a lesson is what happens next. Templating is a <em>test</em>. The moment <code>T</code>
+is a type that owns memory, your container starts reporting on decisions that were free when
+<code>T</code> was <code>int</code> &mdash; and one of them turns out to be wrong.</p>
+
+<h2><span class="num">Knowledge 1</span>What a template actually is</h2>
+
+<p>A template is not a type. It is a <strong>recipe the compiler uses to write a type</strong>, once
+per <code>T</code> you actually use. Write <code>Vector&lt;int&gt;</code> and
+<code>Vector&lt;Vector&lt;int&gt;&gt;</code> in one program and the compiler generates two complete,
+unrelated classes &mdash; that generation step is called <strong>instantiation</strong>.</p>
+
+<p>Two consequences you will meet immediately:</p>
+
+<ul>
+  <li><strong>Errors arrive late, and from inside your header.</strong> Nothing in
+  <code>Vector&lt;T&gt;</code> is checked until some <code>T</code> is supplied. A mistake in
+  <code>grow()</code> is reported at the line in <em>your header</em> that failed, with a
+  &ldquo;in instantiation of member function ... requested here&rdquo; note pointing back at the
+  caller. Read those notes bottom-up: the last one is the line you wrote.</li>
+  <li><strong>Templates stay in the header.</strong> The compiler needs the full body at every call
+  site to instantiate it. Your library is already header-only
+  (<a href="../learning-records/0002-p1-build-shape-header-only-two-presets.md">record 0002</a>), so
+  this changes nothing for you &mdash; but it is why <code>std::vector</code> ships as a header, and
+  worth being able to say why.</li>
+</ul>
+
+<h2><span class="num">Build 1</span>The mechanical part</h2>
+
+<p>Four edits in <code>include/containers/vector.hpp</code>:</p>
+
+<pre><code>    template &lt;typename T&gt;          // 1. above `class Vector`
+    class Vector
+    {
+        T *m_data = nullptr;        // 2. the member type
+
+        void push_back(const T &amp;value)   // 3. see below
+        T &amp;operator[](std::size_t index)
+
+        T *fresh = new T[new_capacity];  // 4. every `new int[` and `int *fresh`</code></pre>
+
+<p>Leave <code>m_size</code> and <code>m_capacity</code> as <code>std::size_t</code>. They count
+slots, not elements &mdash; they have nothing to do with <code>T</code>.</p>
+
+<p>Inside the class body you may keep writing plain <code>Vector</code> rather than
+<code>Vector&lt;T&gt;</code>. That is the <strong>injected class name</strong>: within its own
+definition, a class template refers to its current instantiation by its bare name. So your five
+special members need no edits at all.</p>
+
+<div class="aside">
+  <span class="label">Why <code>push_back</code> changes to <code>const T&amp;</code></span>
+  <p><code>void push_back(int value)</code> took its argument by value, which was exactly right for
+  an <code>int</code> &mdash; copying four bytes is cheaper than the indirection of a reference. But
+  <code>T</code> might be a <code>Vector&lt;int&gt;</code>, or a type holding a megabyte. Taking it
+  by value would deep-copy the argument into the parameter and then copy it <em>again</em> into the
+  buffer: two copies where the caller asked for one. <code>const T&amp;</code> makes it one copy for
+  every <code>T</code>, at the cost of an indirection for the small ones. That is the trade
+  <code>std::vector</code> makes too.</p>
+</div>
+
+<h2><span class="num">Knowledge 2</span>Record 0008's open question, answered</h2>
+
+<p>You left a question open on purpose when you wrote
+<a href="../learning-records/0008-the-ordering-is-the-fix-not-the-self-assignment-guard.md">record
+0008</a>: <em>does the allocate-copy-release conclusion still hold once <code>T</code> has a
+non-trivial copy assignment of its own?</em> Self-assigning the buffer and self-assigning the
+elements one by one are different questions.</p>
+
+<p>It is now testable, so it was tested &mdash; <code>Vector&lt;Vector&lt;int&gt;&gt;</code>,
+self-assigned through a reference, then deep-copied and mutated one level down, under ASan and UBSan
+with <code>-Werror</code>:</p>
+
+<pre><code>Vector&lt;Vector&lt;int&gt;&gt;  outer[2][3] = 23
+after self-assign  outer[2][3] = 23  size 3      # unchanged, correct
+outer[2][3] = 23   copy[2][3] = 999              # copies are independent
+exit 0, no sanitizer report, 0 leaks</code></pre>
+
+<p><strong>The answer is yes, and the reason is the ordering, again.</strong> With allocate-first,
+<code>fresh</code> is a brand-new array when the copy loop runs, and each
+<code>fresh[i] = other.m_data[i]</code> invokes <code>T</code>'s copy assignment on a
+<em>fresh</em> destination and an <em>untouched</em> source. No element is ever its own source. The
+guarantee composes: because the buffer-level ordering is correct, the element-level operation never
+sees an aliasing case at all.</p>
+
+<p>Go and close that section of record 0008.</p>
+
+<h2><span class="num">Knowledge 3</span>The bug <code>int</code> was hiding</h2>
+
+<p>Now the part worth the lesson. Look again at <code>grow()</code>, unchanged since Lesson 5:</p>
+
+<pre><code>            T *fresh = new T[new_capacity];
+            for (std::size_t i = 0; i &lt; m_size; ++i)
+                fresh[i] = m_data[i];        // &lt;-- this line
+            delete[] m_data;</code></pre>
+
+<p>That line <em>copies</em> every element into the new buffer. Then the very next line destroys the
+originals. You are deep-copying data whose only remaining future is to be deleted &mdash; which is
+the precise situation Lesson 8 defined a move for.</p>
+
+<p>While <code>T</code> was <code>int</code>, this cost exactly nothing, and no measurement could
+have told you otherwise: moving an <code>int</code> <em>is</em> copying an <code>int</code>. The
+decision was invisible because the test data could not see it.</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>Measured on this machine</th><th><code>grow()</code> copies</th><th><code>grow()</code> moves</th></tr>
+<tr><td>5 <code>push_back</code>s into <code>Vector&lt;int&gt;</code></td><td>4 allocations</td><td>4 allocations</td></tr>
+<tr><td>8 rows into <code>Vector&lt;Vector&lt;int&gt;&gt;</code></td><td><strong>43 allocations</strong></td><td><strong>36 allocations</strong></td></tr>
+</table>
+</div>
+
+<p>Seven allocations saved, and they are the same seven as last lesson: 1 + 2 + 4, the elements
+relocated as the outer buffer doubles from capacity 1 to 8. In Lesson 8 you watched
+<code>std::vector</code> pay that tax because your move was not <code>noexcept</code>. Here your own
+container is paying it because <code>grow()</code> never asks for a move at all.</p>
+
+<p>The top row is the lesson. Identical numbers, because at <code>T = int</code> the two versions
+compile to the same thing. <strong>A test that only ever instantiates <code>Vector&lt;int&gt;</code>
+cannot distinguish a correct <code>grow()</code> from a wasteful one.</strong> The template did not
+introduce this bug; it made it observable.</p>
+
+<h2><span class="num">Build 2</span>One word</h2>
+
+<p class="filename">include/containers/vector.hpp &mdash; in <code>grow()</code></p>
+<pre><code>            for (std::size_t i = 0; i &lt; m_size; ++i)  // 2. MOVE the old values
+                fresh[i] = std::move(m_data[i]);</code></pre>
+
+<p>Add <code>#include &lt;utility&gt;</code> at the top of the header while you are there.</p>
+
+<p>This is safe for exactly the reason Lesson 8 established: <code>m_data[i]</code> is about to be
+destroyed by the <code>delete[]</code> two lines down, so leaving it blanked costs nothing. And it
+is correct for every <code>T</code>, including ones with no move operations at all &mdash;
+<code>std::move</code> is only a cast, so a <code>T</code> without a move assignment simply resolves
+to its copy assignment, exactly as before. You cannot lose by asking.</p>
+
+<h2><span class="num">Knowledge 4</span>What <code>new T[]</code> costs you</h2>
+
+<p>One honest limitation, so you are not surprised by it in review. <code>new T[n]</code>
+<strong>default-constructs all n elements</strong>. Two consequences:</p>
+
+<ul>
+  <li>Your <code>Vector</code> cannot hold a type that has no default constructor. Measured:
+  <pre><code>struct Point { int x, y; Point(int a, int b) : x(a), y(b) {} };
+containers::Vector&lt;Point&gt; v;
+
+error: no matching constructor for initialization of 'Point[]'
+   128 |             T *fresh = new T[new_capacity];</code></pre></li>
+  <li>Reserving capacity constructs objects in slots nobody has stored anything in yet &mdash; work
+  done for values that will be overwritten.</li>
+</ul>
+
+<p><code>std::vector</code> has neither problem, because it does not use <code>new T[]</code>. It
+allocates <em>raw bytes</em> and constructs each element in place, only when you push it. That is a
+real and worthwhile next step, and it is deliberately not this lesson: it needs placement
+<code>new</code>, explicit destructor calls, and an allocator, and it would swamp the one idea here.
+Note it as known, and be able to say what the fix is called.</p>
+
+<h2><span class="num">Verify</span>All three builds, both instantiations</h2>
+
+<pre><code>$ cmake --build build/dev  &amp;&amp; ./build/dev/tests
+$ cmake --build build/asan &amp;&amp; ./build/asan/tests
+$ leaks --atExit -- /tmp/leakcheck</code></pre>
+
+<p>Every <code>containers::Vector</code> in <code>tests/main.cpp</code> becomes
+<code>containers::Vector&lt;int&gt;</code>. Then add a
+<code>Vector&lt;Vector&lt;int&gt;&gt;</code> case &mdash; without it, everything in Knowledge 3
+stays invisible to your test suite, which is the whole point of the lesson.</p>
+
+<h2><span class="num">Skill</span>Retrieval</h2>
+
+<div class="quiz" data-quiz data-title="Check yourself">
+  <ol class="quiz-items">
+    <li class="quiz-q" data-answer="2" data-explain="A template is a recipe. The compiler generates a separate, complete class for each T actually used, in a step called instantiation. Vector<int> and Vector<double> are unrelated types.">
+      <p class="quiz-prompt">What does the compiler do with a class template?</p>
+      <ul class="quiz-options">
+        <li>Compiles one shared class</li>
+        <li>Generates one class per type</li>
+        <li>Defers all checks to runtime</li>
+        <li>Erases the type parameter</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="4" data-explain="Instantiation needs the full body at every call site, so the definition must be visible in the header. This is why std::vector ships as a header rather than a compiled library.">
+      <p class="quiz-prompt">Why must template definitions live in the header?</p>
+      <ul class="quiz-options">
+        <li>Headers compile much faster</li>
+        <li>The linker demands one copy</li>
+        <li>To keep the build simpler</li>
+        <li>Each use needs the body</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="1" data-explain="grow() copied every element into the new buffer and then deleted the originals. With T = int, copying and moving compile to the same thing, so no measurement on Vector<int> could reveal it.">
+      <p class="quiz-prompt">Which bug did <code>T = int</code> make invisible?</p>
+      <ul class="quiz-options">
+        <li>grow copied instead of moving</li>
+        <li>push_back took its argument twice</li>
+        <li>The guard was in backwards</li>
+        <li>Capacity doubled one step late</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="3" data-explain="std::move is only a cast. If T has no move assignment, overload resolution falls back to T's copy assignment, which is exactly the old behaviour. There is no type for which asking makes things worse.">
+      <p class="quiz-prompt">What if <code>T</code> has no move assignment at all?</p>
+      <ul class="quiz-options">
+        <li>The header fails to compile</li>
+        <li>The elements are left blanked</li>
+        <li>It falls back to copying</li>
+        <li>The compiler generates one</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="2" data-explain="new T[n] default-constructs every element, so T must be default-constructible. std::vector avoids this by allocating raw memory and constructing each element in place with placement new.">
+      <p class="quiz-prompt">What does <code>new T[n]</code> require of <code>T</code>?</p>
+      <ul class="quiz-options">
+        <li>A publicly declared destructor</li>
+        <li>A default constructor exists</li>
+        <li>A noexcept move assignment</li>
+        <li>A copy constructor exists</li>
+      </ul>
+    </li>
+  </ol>
+</div>
+
+<div class="recall" data-recall>
+  <p class="recall-front">Out loud: your <code>Vector&lt;int&gt;</code> tests passed identically
+  before and after fixing <code>grow()</code>. Say why, and say what that tells you about the test
+  suite rather than about the code.</p>
+  <p class="recall-back">Because moving an <code>int</code> is copying an <code>int</code> &mdash;
+  both versions compile to the same instructions for that instantiation. It says the test suite was
+  never capable of distinguishing the two: a container is only as tested as its most demanding
+  element type, and <code>int</code> is the least demanding one there is.</p>
+</div>
+
+<div class="source">
+  <p><strong>Read this one first.</strong> learncpp's class-template chapter is the shortest route to
+  the syntax; the template-argument-deduction chapter explains why
+  <code>Vector v{1, 2}</code> works in C++17 without you naming the type.</p>
+
+  <div class="table-wrap">
+  <table>
+  <tr><th>This lesson</th><th>Read (learncpp)</th><th>Watch (The Cherno)</th></tr>
+  <tr>
+    <td>Knowledge 1 &mdash; instantiation</td>
+    <td><a href="https://www.learncpp.com/cpp-tutorial/class-templates/">Class templates</a></td>
+    <td rowspan="2"><a href="https://www.youtube.com/watch?v=I-hZkUa9mIs">Templates in C++</a></td>
+  </tr>
+  <tr>
+    <td>Build 1 &mdash; the mechanical edits</td>
+    <td><a href="https://www.learncpp.com/cpp-tutorial/template-classes-and-multiple-files/">Template classes and multiple files</a></td>
+  </tr>
+  <tr>
+    <td>Knowledge 4 &mdash; what <code>new T[]</code> forces</td>
+    <td><a href="https://www.learncpp.com/cpp-tutorial/stdvector-and-stack-behavior/">std::vector and stack behavior</a></td>
+    <td>&mdash;</td>
+  </tr>
+  <tr>
+    <td>The authority to cite in review</td>
+    <td colspan="2"><a href="https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rt-generic">Core Guidelines T.1</a> &mdash; use templates to raise the level of abstraction. Also <a href="https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rper-move">Per.10</a> on moving rather than copying where the source is expiring.</td>
+  </tr>
+  </table>
+  </div>
+</div>
+
+<footer>
+  <h2>Where this sits</h2>
+  <p>Before: <a href="./0008-move-semantics-and-the-noexcept-that-pays.html">Lesson 8 &mdash; Move
+  Semantics</a>, which built the move operations this lesson finally puts to work inside your own
+  <code>grow()</code>.</p>
+  <p>Reference: <a href="../reference/vector-internals.html">Vector internals</a> &mdash; the
+  <code>grow()</code> step strip needs its copy arrow changed to a move.
+  <a href="../reference/ownership.html">Ownership and the Rule of Five</a>.</p>
+  <p>Next: <strong>assertions</strong>. Two lessons in a row have now ended with &ldquo;the test
+  could not have caught this.&rdquo; Row one of the table above is the clearest case yet: identical
+  passing output from two different implementations. That is Block 5.</p>
+  <p class="ask">Ask me anything here that did not land. The two that usually need a second pass are
+  why template errors point into your header instead of your test file, and why
+  <code>std::move</code> in <code>grow()</code> is safe even for a <code>T</code> that cannot
+  move.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>
