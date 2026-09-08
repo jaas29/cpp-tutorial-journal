@@ -23,6 +23,8 @@ Curated from the tutorial resource list reviewed by Prof. Roy. Full annotated ve
   Canonical three-book series. Use for: P2, plus *The Next Week* for the BVH.
 - [Chess Programming Wiki](https://www.chessprogramming.org/)
   Use for: P3 — bitboards, perft, alpha-beta, transposition tables. [Perft results](https://www.chessprogramming.org/Perft_Results) make move generation provably correct.
+- [GoogleTest documentation](https://google.github.io/googletest/) — Google
+  Written by the maintainers, and versioned with the release you pin. Use for: P1 testing, if a framework is adopted. The [Primer](https://google.github.io/googletest/primer.html) and the [assertions reference](https://google.github.io/googletest/reference/assertions.html) are the whole of what P1 would need; the [CMake quickstart](https://google.github.io/googletest/quickstart-cmake.html) is the `FetchContent` recipe. Not currently wired into `p1-containers` — the plan is a `CHECK_EQ` macro instead.
 - [Compiler Explorer (godbolt.org)](https://godbolt.org/)
   Shows the assembly a line compiles to. Use for: making the cost of an abstraction visible instead of theoretical. Overlaps with Computer Systems.
 ### Video

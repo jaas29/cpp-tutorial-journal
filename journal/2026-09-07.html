@@ -135,6 +135,40 @@ not.</p>
 constructor needs <code>noexcept</code>, how to wire GoogleTest &mdash; ask. That is what the
 teacher is for, and asking mid-block is faster than being stuck in one.</p>
 
+<h2>How the day actually went</h2>
+
+<p><em>Added 8 September, the morning after. The above is a plan; this is what came of it.</em></p>
+
+<p>Blocks 1 through 4 landed, in three commits: <code>c47e13a</code> copy constructor and copy
+assignment, <code>fd314e0</code> the two move operations completing the Rule of Five, and
+<code>b5e28ea</code> the template. Block 2's three-configuration run came back clean and is the
+transcript I am taking to the meeting &mdash; <code>dev</code> and <code>asan</code> both exit 0,
+<code>leaks</code> reports 0 leaks for 0 total leaked bytes.</p>
+
+<p>Block 4 produced the ninth learning record, though not the one it predicted. The
+allocate-copy-release ordering did hold once <code>T</code> had a copy assignment of its own, which
+closed the question record 0008 left open. The record came from somewhere else entirely: templating
+exposed a <code>grow()</code> that deep-copied every element and then destroyed the originals on the
+next line, a bug written in Lesson 5 that no <code>Vector&lt;int&gt;</code> test could ever have
+caught, because moving an <code>int</code> is copying an <code>int</code>. Fifty-one allocations down
+to forty-four.
+<a href="../learning-records/0009-a-container-templated-on-int-cannot-see-its-own-copies.md">Record 0009</a>.</p>
+
+<p><strong>Block 5 did not happen, and not because the day ran out.</strong> I decided GoogleTest was
+not important enough to spend the time on. The property missing from
+<code>tests/main.cpp</code> is a nonzero exit code when a check is wrong &mdash; that is the whole
+finding from record 0008. A framework supplies that property, but it also brings
+<code>FetchContent</code>, a pinned tag, a rename of the test file and a minute of build time per
+preset, and none of that is the part I need. Block 5's own fallback above said as much. A ten-line
+<code>CHECK_EQ</code> macro buys the same property in an afternoon, and the days it saves go to
+<code>unordered_map</code>, which is the actual gap against the four-week plan. Moved to 10
+September.</p>
+
+<p>Block 6, the checkpoint one-pager, is written and stays out of this repo. Still open going into
+Wednesday: <code>Vector</code> has no <code>const</code> <code>operator[]</code>, so a
+<code>const Vector&lt;T&gt;&amp;</code> cannot be indexed at all &mdash; the first thing a reviewer
+would hit.</p>
+
 </div>
 </body>
 </html>
