@@ -71,8 +71,28 @@ self-assignment arrives through two names for one object, via parameters.
   sheet shows two lines above. Corrected.
 - Lesson 7 Knowledge 4 carries the measured table rather than the received rule.
 
-## Open
+## Closed 2026-09-07 by [[lessons/0009-vector-t-and-the-bug-int-was-hiding.html]]
 
-Not tested: whether the same conclusion holds once `Vector` is a template and `T` has a
-non-trivial copy assignment of its own. Self-assigning `T` elements one by one is a different
-question from self-assigning the buffer, and it is worth re-testing when `Vector<T>` lands.
+The open question was whether the allocate-copy-release conclusion survives once `Vector` is a
+template and `T` has a non-trivial copy assignment of its own — self-assigning the buffer and
+self-assigning the elements one by one being different questions.
+
+Tested with `Vector<Vector<int>>`, self-assigned through a reference, then deep-copied and mutated
+one level down, under ASan and UBSan with `-Werror`:
+
+```
+Vector<Vector<int>>  outer[2][3] = 23
+after self-assign    outer[2][3] = 23   size 3      # unchanged, correct
+outer[2][3] = 23     ocopy[2][3] = 999              # copies are independent
+exit 0, no sanitizer report, 0 leaks
+```
+
+**The answer is yes, and the ordering is again the reason.** With allocate-first, `fresh` is a
+brand-new array when the copy loop runs, so every `fresh[i] = other.m_data[i]` invokes `T`'s copy
+assignment on a fresh destination and an untouched source. No element is ever its own source.
+
+The generalisation worth carrying forward: **the buffer-level ordering is what keeps the
+element-level operation from ever seeing an aliasing case at all.** Element-wise self-assignment is
+not a second problem to solve; it is a problem the first fix already prevents from arising. Expect
+the same shape in `unordered_map` — get the ordering right at the bucket-array level and the
+per-node operations never face aliasing.
