@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 12 &mdash; Load Factor, and Why Rehash Is Not grow()</title>
+<meta name="description" content="A fixed bucket count makes the O(1) claim false: 800 keys in 8 buckets is a chain of 112. Rehashing fixes it - but it cannot reuse Vector::grow, because every element's index is recomputed rather than preserved.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<link rel="stylesheet" href="../assets/quiz.css">
+</head>
+<body>
+
+<p class="kicker">Lesson 12 &middot; Weeks 3&ndash;4 &middot; Project 1</p>
+<h1>Load Factor, and Why Rehash Is Not <code>grow()</code></h1>
+<p class="standfirst">Your map has 8 buckets and always will. That is not a missing feature, it is a
+<strong>false advertisement</strong>: a hash map that cannot grow is not O(1), it is a fixed number of
+linked lists, and at 800 keys it behaves like one. Fixing it looks at first like copying
+<code>Vector::grow()</code> across. It is not, and the reason why is the one idea in this lesson.</p>
+
+<h2><span class="num">Knowledge 1</span>Load factor is just average chain length</h2>
+
+<p>One number describes how crowded the table is:</p>
+
+<pre><code>load_factor = m_size / bucket_count      // entries per bucket, on average</code></pre>
+
+<p>It is worth seeing that this <em>is</em> the cost of a lookup. Finding a key is: one hash, one
+modulo, one array index &mdash; all constant &mdash; and then <strong>a linear walk down whatever
+chain is in that bucket</strong>. So the average lookup is constant work plus the average chain
+length, and the average chain length is the load factor. Keep the load factor bounded by a constant
+and lookup is O(1). Let it grow with <code>n</code> and lookup is O(n), no matter that you called the
+structure a hash map.</p>
+
+<p>Here is what your current header actually does. Measured, same 800 keys, one table allowed to grow
+and one pinned at 8 buckets:</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>800 keys</th><th>buckets</th><th>load factor</th><th>longest chain</th></tr>
+<tr><td>Fixed at 8 (your header now)</td><td>8</td><td><strong>100.0</strong></td><td><strong>112</strong></td></tr>
+<tr><td>Growing, max load 0.75</td><td>2048</td><td>0.39</td><td><strong>4</strong></td></tr>
+</table>
+</div>
+
+<p>112 versus 4. A worst-case lookup that reads 112 entries and compares 112 strings is not a
+different constant from one that reads 4 &mdash; it is a different complexity class, and it gets
+worse forever as you insert. <strong>This measurement is the justification for the whole lesson, and
+it belongs in the writeup.</strong></p>
+
+<h2><span class="num">Knowledge 2</span>The idea: rehash is not relocation</h2>
+
+<p>Here is the trap. You have solved &ldquo;this container ran out of room&rdquo; once already, in
+<code>Vector::grow()</code>, and the shape looks identical: allocate a bigger thing, move the
+contents across, release the old one. So the instinct is to reuse the shape.</p>
+
+<p>It does not transfer, and the reason is one sentence:</p>
+
+<p style="text-align:center"><strong>In a <code>Vector</code>, an element's index is a property of
+the element. In a hash map, it is a property of the <em>table size</em>.</strong></p>
+
+<p><code>v[3]</code> is the fourth element before growth and the fourth element after. Its index
+never depended on the capacity. But a key's bucket is
+<code>hash(key) % bucket_count</code> &mdash; change <code>bucket_count</code> and
+<strong>every single index changes</strong>. Move chain 0 into the new chain 0 and you have built a
+table in which almost nothing can be found, because <code>find</code> will compute the new index and
+look somewhere else.</p>
+
+<svg viewBox="0 0 560 190" width="100%" height="190" role="img" aria-label="The key alan moving from bucket 0 in an 8-bucket table to bucket 8 in a 16-bucket table">
+  <text x="0" y="14" class="svg-mono svg-faint" font-size="11">bucket_count = 8</text>
+  <text x="320" y="14" class="svg-mono svg-faint" font-size="11">bucket_count = 16</text>
+
+  <rect x="0" y="26" width="150" height="24" class="svg-box"/>
+  <text x="8" y="43" class="svg-mono svg-ink" font-size="11">0 &rarr; alan</text>
+  <rect x="0" y="50" width="150" height="24" class="svg-box"/>
+  <text x="8" y="67" class="svg-mono svg-soft" font-size="11">1 &rarr; ada</text>
+
+  <rect x="320" y="26" width="150" height="24" class="svg-box"/>
+  <text x="328" y="43" class="svg-mono svg-soft" font-size="11">0 &rarr; (empty)</text>
+  <rect x="320" y="50" width="150" height="24" class="svg-box"/>
+  <text x="328" y="67" class="svg-mono svg-soft" font-size="11">1 &rarr; ada</text>
+  <rect x="320" y="98" width="150" height="24" class="svg-box"/>
+  <text x="328" y="115" class="svg-mono svg-ink" font-size="11">8 &rarr; alan</text>
+
+  <path d="M 155 38 C 230 38 240 110 315 110" class="svg-stroke"/>
+  <text x="175" y="86" class="svg-mono svg-accent" font-size="10">13208046377741452544</text>
+  <text x="175" y="100" class="svg-mono svg-accent" font-size="10">% 8 = 0 &nbsp;but&nbsp; % 16 = 8</text>
+  <text x="0" y="160" class="svg-mono svg-faint" font-size="10">The hash never changed. The modulus did. Every key must be asked again.</text>
+</svg>
+
+<p>So rehashing is not a relocation, it is a <strong>rebuild</strong>: construct a whole new bucket
+array, then re-ask every key where it now belongs. It is more work than <code>grow()</code>, and it
+is the price the structure charges for making the index arithmetic rather than storage.</p>
+
+<h2><span class="num">Build 1</span><code>rehash</code>, and the automatic trigger</h2>
+
+<p class="filename">include/containers/hash_map.hpp &mdash; public section</p>
+<pre><code>        static constexpr double max_load_factor = 0.75;
+
+        double load_factor() const
+        {
+            return static_cast&lt;double&gt;(m_size) / static_cast&lt;double&gt;(m_buckets.size());
+        }
+
+        void rehash(std::size_t new_bucket_count)
+        {
+            Vector&lt;Vector&lt;Entry&gt;&gt; fresh;                 // 1. build the new table
+            for (std::size_t i = 0; i &lt; new_bucket_count; ++i)
+                fresh.push_back(Vector&lt;Entry&gt;{});
+
+            for (std::size_t b = 0; b &lt; m_buckets.size(); ++b)   // 2. re-ask every key
+            {
+                Vector&lt;Entry&gt; &amp;chain = m_buckets[b];
+                for (std::size_t i = 0; i &lt; chain.size(); ++i)
+                {
+                    std::size_t nb = std::hash&lt;K&gt;{}(chain[i].key) % new_bucket_count;
+                    fresh[nb].push_back(std::move(chain[i]));     // move, not copy
+                }
+            }
+
+            m_buckets = std::move(fresh);                 // 3. adopt it
+        }</code></pre>
+
+<p>And the trigger, at the end of <code>insert</code>, after <code>++m_size</code>:</p>
+
+<pre><code>            if (load_factor() &gt; max_load_factor)
+                rehash(m_buckets.size() * 2);</code></pre>
+
+<p>Three things to notice, each a callback to something you already own:</p>
+
+<ul>
+  <li><strong>The <code>static_cast&lt;double&gt;</code> is not decoration.</strong> Both members are
+  <code>std::size_t</code>, so <code>m_size / m_buckets.size()</code> is <em>integer</em> division:
+  6/8 is 0, 7/8 is 0, and your load factor is 0 until it suddenly becomes 1. The rehash would never
+  fire. Cast one operand and the whole expression becomes floating point.</li>
+  <li><strong><code>std::move(chain[i])</code> is Lesson 9's fix, in its second home.</strong> The
+  old table is about to be destroyed, so its entries have no future &mdash; copying them is pure
+  waste, and for a <code>V</code> that owns memory it is an allocation per entry per rehash. Record
+  <a href="../learning-records/0009-a-container-templated-on-int-cannot-see-its-own-copies.md">0009</a>
+  predicted exactly this: rehash is the same relocate-and-destroy operation as
+  <code>grow()</code>, and the same mistake was available here.</li>
+  <li><strong><code>m_buckets = std::move(fresh)</code> is your move assignment from Lesson 8.</strong>
+  One line, and the old bucket array is released by the operator you wrote three blocks ago. If you
+  had not written it, this would deep-copy 2048 chains and then destroy the original. The Rule of
+  Five is paying rent here.</li>
+</ul>
+
+<div class="aside">
+  <span class="label">Why 0.75, and why doubling</span>
+  <p>0.75 is the conventional threshold (Java's <code>HashMap</code> uses it too) and the reasoning
+  is a trade you can state: a lower threshold means shorter chains but more empty buckets and more
+  frequent rehashes; a higher one means less memory and longer chains. Below about 1.0 the average
+  chain is short enough that the constant factors dominate, so 0.75 buys most of the benefit.</p>
+  <p><strong>Doubling</strong> is the same amortization argument as <code>Vector</code>, and you
+  should be able to give it: rehashing <em>n</em> entries costs O(n), but doubling means it happens
+  at sizes 8, 16, 32, 64 &hellip;, so the total rehash work to reach <em>n</em> entries is
+  <em>n</em> + <em>n</em>/2 + <em>n</em>/4 + &hellip; &lt; 2<em>n</em>. Spread over <em>n</em>
+  inserts, that is a constant per insert. <strong>Amortized O(1)</strong> means exactly this: a few
+  inserts are expensive, the average is not.</p>
+</div>
+
+<h2><span class="num">Verify</span>Watch it grow, then break it on purpose</h2>
+
+<p>Insert 40 keys and print the table state at every rehash. Measured:</p>
+
+<pre><code>  n   buckets  load   longest
+  1       8    0.12      1
+  2       8    0.25      1
+  3       8    0.38      2
+  6       8    0.75      3
+  7      16    0.44      2   &lt;- rehash
+ 13      32    0.41      3   &lt;- rehash
+ 25      64    0.39      3   &lt;- rehash
+ 40      64    0.62      3
+found after rehashing: 40 / 40</code></pre>
+
+<p>Read the load column: it climbs to the threshold, the table doubles, and it drops back to roughly
+half. That sawtooth is the structure working. The longest chain never exceeds 3 while the entry count
+grows sixfold &mdash; that is the O(1) claim becoming true.</p>
+
+<p>The last line is the one that matters. <strong>Look up all 40 keys after four rehashes.</strong> A
+rehash that moved chains wholesale instead of re-hashing would still print a plausible bucket count
+and a plausible load factor, and would silently fail to find most of the keys. Nothing else in the
+transcript catches that.</p>
+
+<h3>Then do it with a <code>V</code> that owns memory</h3>
+
+<p>Record 0009's rule, applied: an <code>int</code>-valued map cannot see the difference between a
+rehash that moves and one that copies, and cannot catch a rehash that double-frees. So test with
+<code>HashMap&lt;std::string, Vector&lt;int&gt;&gt;</code> from the first run, not as a follow-up.
+Under the <code>asan</code> preset, 40 keys each holding a 5-element <code>Vector</code>, through
+four rehashes:</p>
+
+<pre><code>size 40  buckets 64
+intact after rehashing: 40 / 40
+exit 0, no sanitizer report</code></pre>
+
+<p>Every value still owns its own buffer, every buffer is still exactly right, nothing was freed
+twice. That single test exercises your <code>Vector</code>'s move constructor, move assignment,
+destructor and deep copy all at once, from inside a different container.</p>
+
+<h2><span class="num">Knowledge 3</span>Two things this breaks, and one the standard library does better</h2>
+
+<p><strong>Rehashing invalidates everything.</strong> Same rule as Lesson 10, same underlying cause:
+the buffers moved. Any pointer, reference or iterator into the map is dangling after an insert that
+triggers a rehash. Note this now, because Lesson 13 gives you an iterator to invalidate.</p>
+
+<p><strong>Your bucket count is a power of two, and that is a real weakness.</strong> Doubling from 8
+gives 16, 32, 64 &hellip; and <code>% 2^k</code> keeps only the low <em>k</em> bits of the hash. Any
+structure in those low bits survives into the bucket index. Combine that with
+<code>std::hash&lt;int&gt;</code> being the identity function on this machine (Lesson 11) and you get
+a reproducible disaster:</p>
+
+<pre><code>key 0  -&gt; bucket 0        key 24 -&gt; bucket 0
+key 8  -&gt; bucket 0        key 32 -&gt; bucket 0
+key 16 -&gt; bucket 0</code></pre>
+
+<p>Every multiple of 8 in bucket 0. A map with integer keys that happen to be aligned &mdash;
+addresses, IDs, offsets, timestamps in even units &mdash; degenerates into one long chain, and no
+amount of rehashing helps, because doubling the table preserves the property.</p>
+
+<p><strong>Here is what <code>std::unordered_map</code> does instead</strong>, measured on this
+machine by inserting into one and printing <code>bucket_count()</code> at every change:</p>
+
+<pre><code>n=1   buckets=2        n=24  buckets=47
+n=3   buckets=5        n=48  buckets=97
+n=6   buckets=11       n=98  buckets=197
+n=12  buckets=23       n=198 buckets=397
+max_load_factor 1</code></pre>
+
+<p><strong>Primes, not powers of two.</strong> 2, 5, 11, 23, 47, 97, 197, 397 &mdash; still roughly
+doubling, so the amortization argument is unchanged, but <code>% prime</code> mixes the <em>whole</em>
+hash into the index rather than keeping the low bits, which defends against exactly the failure
+above. libc++ pays a real cost for this &mdash; integer division by a runtime value is far slower
+than the single bitmask a power-of-two table compiles to &mdash; and takes it anyway, because a
+predictable pathological case is worse than a slower modulo.</p>
+
+<p>Note also <code>max_load_factor 1</code>, not 0.75: the standard library tolerates longer chains
+than you do, because its buckets are better distributed.</p>
+
+<p><strong>Do not change your implementation.</strong> Power-of-two doubling is fine for the string
+keys in your tests, the fix is a prime table or a hash mixing step, and both are more interesting as
+a <em>finding</em> in the writeup than as an untested change five days before the deliverable. This
+is a measured, named, explained limitation of your container &mdash; which is precisely what the
+deliverable asks for: &ldquo;an honest account of where the standard library wins and why.&rdquo;</p>
+
+<h2><span class="num">Skill</span>Retrieval</h2>
+
+<div class="quiz" data-quiz data-title="Check yourself">
+  <ol class="quiz-items">
+    <li class="quiz-q" data-answer="3" data-explain="A key's bucket is hash(key) % bucket_count, so changing the bucket count changes every index. Moving chain 0 to the new chain 0 builds a table in which find looks in the wrong place.">
+      <p class="quiz-prompt">Why can rehash not just move chains across?</p>
+      <ul class="quiz-options">
+        <li>The chains may be too long</li>
+        <li>Moving would copy each value</li>
+        <li>Every index is recomputed</li>
+        <li>The old table is still live</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="1" data-explain="Load factor is entries divided by buckets, which is the average chain length, which is the linear part of a lookup. Bound it by a constant and lookup is constant time.">
+      <p class="quiz-prompt">What does the load factor measure?</p>
+      <ul class="quiz-options">
+        <li>The average chain length</li>
+        <li>The fraction of used slots</li>
+        <li>The collisions per insert</li>
+        <li>The bytes wasted per key</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="4" data-explain="Both operands are std::size_t, so the division is integer division and evaluates to 0 until size reaches bucket count. The threshold is never exceeded and the table never grows.">
+      <p class="quiz-prompt">What breaks without the <code>static_cast&lt;double&gt;</code>?</p>
+      <ul class="quiz-options">
+        <li>The value overflows at scale</li>
+        <li>Rehash fires on every insert</li>
+        <li>The comparison never compiles</li>
+        <li>The table never grows at all</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="2" data-explain="Rehashing n entries costs O(n) but doubling makes it happen at 8, 16, 32..., so total rehash work to reach n is under 2n. Spread across n inserts that is a constant each.">
+      <p class="quiz-prompt">Why is insertion amortized O(1) despite rehashing?</p>
+      <ul class="quiz-options">
+        <li>Rehashing runs in the background</li>
+        <li>Doubling makes the total linear</li>
+        <li>Most inserts skip the chain</li>
+        <li>The load factor stays below one</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="1" data-explain="Modulo a power of two keeps only the low bits of the hash, so structure in those bits survives into the index. libc++ uses prime bucket counts so the whole hash affects the bucket.">
+      <p class="quiz-prompt">Why does libc++ size its table in primes?</p>
+      <ul class="quiz-options">
+        <li>Powers of two keep low bits</li>
+        <li>Primes make division faster</li>
+        <li>It halves the memory used</li>
+        <li>Doubling would break amortizing</li>
+      </ul>
+    </li>
+  </ol>
+</div>
+
+<div class="recall" data-recall>
+  <p class="recall-front">Out loud: you tested the rehash with
+  <code>HashMap&lt;std::string, Vector&lt;int&gt;&gt;</code> rather than
+  <code>HashMap&lt;std::string, int&gt;</code>. Say why that was the deliberate choice and what the
+  <code>int</code> version could not have told you.</p>
+  <p class="recall-back">Because rehash is a relocate-and-destroy: it moves every entry into a new
+  table and then destroys the old one. With <code>V = int</code>, moving and copying compile to the
+  same instructions and there is no owned buffer to double-free, so a rehash that copies instead of
+  moves, or one that leaves the old entries owning memory they have handed away, produces identical
+  passing output. With <code>V = Vector&lt;int&gt;</code> each value owns a heap buffer, so the same
+  test exercises the move constructor, move assignment and destructor at once, and ASan sees any
+  double free. It is record 0009's rule: a container is only as tested as its most demanding element
+  type.</p>
+</div>
+
+<div class="source">
+  <p><strong>Read this one first.</strong> cppreference's <code>unordered_map</code> load-factor and
+  <code>rehash</code> pages are short and are the specification your container is imitating &mdash;
+  read what the standard promises about invalidation, since that is the part you must match in the
+  writeup.</p>
+
+  <div class="table-wrap">
+  <table>
+  <tr><th>This lesson</th><th>Read</th></tr>
+  <tr>
+    <td>Knowledge 1 &mdash; load factor</td>
+    <td><a href="https://en.cppreference.com/w/cpp/container/unordered_map/load_factor">load_factor</a>, <a href="https://en.cppreference.com/w/cpp/container/unordered_map/max_load_factor">max_load_factor</a></td>
+  </tr>
+  <tr>
+    <td>Build 1 &mdash; rehash and its guarantees</td>
+    <td><a href="https://en.cppreference.com/w/cpp/container/unordered_map/rehash">unordered_map::rehash</a> &mdash; note the invalidation clause</td>
+  </tr>
+  <tr>
+    <td>Knowledge 2 &mdash; the amortization argument</td>
+    <td><a href="https://www.learncpp.com/cpp-tutorial/stdvector-resizing-and-capacity/">learncpp &mdash; resizing and capacity</a>, the same doubling argument for <code>Vector</code></td>
+  </tr>
+  <tr>
+    <td>The authority to cite in review</td>
+    <td><a href="https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rper-measure">Per.6</a> &mdash; don't claim performance without measurement. The 112-versus-4 table is that rule being followed.</td>
+  </tr>
+  </table>
+  </div>
+</div>
+
+<footer>
+  <h2>Where this sits</h2>
+  <p>Before: <a href="./0011-hash-maps-buckets-and-the-modulo.html">Lesson 11 &mdash; Buckets</a>.
+  With this lesson the O(1) claim in that lesson's opening is finally true.</p>
+  <p>Reference: <a href="../reference/glossary.html">Glossary</a> &mdash; <em>load factor</em>,
+  <em>rehash</em>, <em>amortized</em>. A <code>reference/hashmap-internals.html</code> sheet is owed,
+  as the counterpart to <a href="../reference/vector-internals.html">vector-internals</a>.</p>
+  <p>Next: <a href="./0013-iterating-a-bucketed-structure.html">Lesson 13 &mdash; Iterating a
+  Bucketed Structure</a>, and <code>erase</code>. The iterator is the hard version of Lesson 10:
+  <code>++</code> has to run off the end of one chain and go hunting for the next non-empty bucket,
+  and the empty-table case has to land exactly on <code>end()</code>.</p>
+  <p class="ask">Ask me anything here that did not land. The two that usually need a second pass are
+  why a key's bucket changes when the table grows but a vector element's index does not, and why the
+  power-of-two bucket count is a weakness rather than an optimization.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

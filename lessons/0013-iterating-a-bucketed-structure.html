@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 13 &mdash; Iterating a Bucketed Structure, and the Five Typedefs</title>
+<meta name="description" content="A hash map iterator holds a position in two dimensions and has to skip empty buckets. Then range-for works but std::count_if does not - and the fix is five typedefs that explain what iterator_traits is for.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<link rel="stylesheet" href="../assets/quiz.css">
+</head>
+<body>
+
+<p class="kicker">Lesson 13 &middot; Weeks 3&ndash;4 &middot; Project 1</p>
+<h1>Iterating a Bucketed Structure, and the Five Typedefs</h1>
+<p class="standfirst">In Lesson 10 the iterator was a pointer and the lesson was that you already had
+one. Here you have to build the thing, because there is no single pointer that walks a table of
+chains. Then something instructive happens: the range-based <code>for</code> works immediately, and
+<code>std::count_if</code> does not compile at all. The gap between those two facts is
+<code>std::iterator_traits</code>, and it is the last piece of the checkpoint sentence
+&ldquo;iterators that work with STL algorithms.&rdquo;</p>
+
+<h2><span class="num">Knowledge 1</span>A position in two dimensions, not one</h2>
+
+<p>Walking a <code>Vector</code> is walking a line. Walking a hash map is walking a ragged table:</p>
+
+<svg viewBox="0 0 560 200" width="100%" height="200" role="img" aria-label="Six buckets of differing chain lengths, with a dotted path threading through the occupied entries and skipping the empty buckets">
+  <g class="svg-mono" font-size="10">
+    <text x="0" y="24" class="svg-faint">0</text>
+    <text x="0" y="54" class="svg-faint">1</text>
+    <text x="0" y="84" class="svg-faint">2</text>
+    <text x="0" y="114" class="svg-faint">3</text>
+    <text x="0" y="144" class="svg-faint">4</text>
+    <text x="0" y="174" class="svg-faint">5</text>
+  </g>
+  <rect x="20" y="10" width="80" height="20" class="svg-box"/><text x="60" y="24" text-anchor="middle" class="svg-mono svg-ink" font-size="10">alan</text>
+  <rect x="104" y="10" width="80" height="20" class="svg-box"/><text x="144" y="24" text-anchor="middle" class="svg-mono svg-ink" font-size="10">cat</text>
+  <rect x="20" y="40" width="80" height="20" class="svg-box"/><text x="60" y="54" text-anchor="middle" class="svg-mono svg-ink" font-size="10">ada</text>
+  <text x="24" y="84" class="svg-mono svg-faint" font-size="10">(empty)</text>
+  <text x="24" y="114" class="svg-mono svg-faint" font-size="10">(empty)</text>
+  <rect x="20" y="130" width="80" height="20" class="svg-box"/><text x="60" y="144" text-anchor="middle" class="svg-mono svg-ink" font-size="10">roy</text>
+  <text x="24" y="174" class="svg-mono svg-faint" font-size="10">(empty)</text>
+
+  <path d="M 60 32 L 144 32 L 144 38 M 144 32 C 200 32 200 54 190 54 L 60 54 L 60 62 M 60 54 C 240 54 240 144 190 144 L 60 144"
+        class="svg-stroke" stroke-dasharray="3 3"/>
+  <circle cx="60" cy="20" r="3" class="svg-accent"/>
+  <text x="200" y="176" class="svg-mono svg-faint" font-size="10">++ crosses chains and skips empty buckets. end() is past bucket 5.</text>
+  <text x="200" y="20" class="svg-mono svg-accent" font-size="10">begin()</text>
+</svg>
+
+<p>So the iterator has to hold <strong>two numbers, not one</strong>: which bucket, and how far down
+that bucket's chain. Plus a pointer to the table, since it has to be able to look at the
+<em>other</em> buckets to find where to go next.</p>
+
+<p>That gives <code>operator++</code> a job it did not have in Lesson 10. Stepping forward inside a
+chain is easy. Stepping off the end of a chain means walking forward through buckets &mdash; possibly
+several empty ones in a row &mdash; until you find one with something in it, or you run out of table.
+Get that wrong in either direction and you either skip entries or dereference an empty bucket.</p>
+
+<h3>The invariant that makes it manageable</h3>
+
+<p>Do not try to write that logic inside <code>operator++</code>. Write down a rule the iterator
+obeys at all times, put it in one function, and call that function after every move:</p>
+
+<p style="text-align:center"><strong>An iterator is always either sitting on a real entry, or sitting
+exactly on the end position.</strong> Never in between.</p>
+
+<pre><code>            void settle()
+            {
+                while (m_bucket &lt; m_buckets-&gt;size() &amp;&amp;
+                       m_index &gt;= (*m_buckets)[m_bucket].size())
+                {
+                    ++m_bucket;
+                    m_index = 0;
+                }
+            }</code></pre>
+
+<p>Read the condition as one sentence: <em>while there is still table left, and I have run past the
+end of the chain I am in, move to the start of the next bucket.</em> When it stops, either
+<code>m_bucket</code> has reached the bucket count (that is the end position) or
+<code>m_index</code> is a valid slot in a non-empty chain. Exactly the two legal states, no
+others.</p>
+
+<p><strong>The payoff is that three separate problems become one.</strong> Call <code>settle()</code>
+from the constructor and from <code>operator++</code>, and all of these fall out with no extra
+code:</p>
+
+<ul>
+  <li><strong>Leading empty buckets.</strong> <code>begin()</code> is constructed at bucket 0, slot 0
+  even if bucket 0 is empty; <code>settle()</code> walks it forward to the first real entry.</li>
+  <li><strong>Runs of empty buckets mid-table.</strong> The <code>while</code> is a loop, not an
+  <code>if</code>. Ten empty buckets in a row cost ten iterations and no special case.</li>
+  <li><strong>The empty map.</strong> Every bucket is empty, so <code>settle()</code> runs
+  <code>m_bucket</code> all the way to the bucket count &mdash; which is precisely the end position.
+  <code>begin() == end()</code> comes out true without a single line written to make it true.</li>
+</ul>
+
+<h2><span class="num">Build 1</span>The iterator</h2>
+
+<p class="filename">include/containers/hash_map.hpp &mdash; nested inside <code>HashMap</code>, public section</p>
+<pre><code>        class iterator
+        {
+            Vector&lt;Vector&lt;Entry&gt;&gt; *m_buckets = nullptr;
+            std::size_t m_bucket = 0;   // which bucket
+            std::size_t m_index = 0;    // how far down its chain
+
+            void settle() { /* as above */ }
+
+        public:
+            iterator(Vector&lt;Vector&lt;Entry&gt;&gt; *buckets, std::size_t bucket, std::size_t index)
+                : m_buckets(buckets), m_bucket(bucket), m_index(index)
+            {
+                settle();               // enforce the invariant on construction
+            }
+
+            Entry &amp;operator*()  const { return (*m_buckets)[m_bucket][m_index]; }
+            Entry *operator-&gt;() const { return &amp;(*m_buckets)[m_bucket][m_index]; }
+
+            iterator &amp;operator++()
+            {
+                ++m_index;
+                settle();
+                return *this;
+            }
+
+            bool operator==(const iterator &amp;other) const
+            {
+                return m_bucket == other.m_bucket &amp;&amp; m_index == other.m_index;
+            }
+            bool operator!=(const iterator &amp;other) const { return !(*this == other); }
+        };
+
+        iterator begin() { return iterator(&amp;m_buckets, 0, 0); }
+        iterator end()   { return iterator(&amp;m_buckets, m_buckets.size(), 0); }</code></pre>
+
+<p><code>end()</code> is constructed at <code>(bucket_count, 0)</code>. Look at
+<code>settle()</code>'s condition and confirm for yourself that it leaves that position untouched:
+<code>m_bucket &lt; size()</code> is already false, so the loop body never runs. The end position is
+a legal value that no amount of settling will move, which is what makes it a reliable stopping
+point &mdash; the same property <code>m_data + m_size</code> had in Lesson 10.</p>
+
+<p><code>operator-&gt;</code> is new. It exists so that <code>it-&gt;key</code> works as shorthand
+for <code>(*it).key</code>. The rule is unusual and worth knowing: the compiler applies
+<code>operator-&gt;</code> <em>repeatedly</em> until it reaches a real pointer, then does one final
+built-in <code>-&gt;</code>. So returning <code>Entry*</code> is exactly right.</p>
+
+<h2><span class="num">Build 2</span><code>erase</code>, in constant time</h2>
+
+<pre><code>        bool erase(const K &amp;key)
+        {
+            Vector&lt;Entry&gt; &amp;chain = m_buckets[bucket_for(key)];
+            for (std::size_t i = 0; i &lt; chain.size(); ++i)
+                if (chain[i].key == key)
+                {
+                    chain[i] = std::move(chain[chain.size() - 1]);  // pull the last one back
+                    chain.pop_back();                               // drop the tail
+                    --m_size;
+                    return true;
+                }
+            return false;
+        }</code></pre>
+
+<p>You need one three-line addition to <code>Vector</code> for this:</p>
+
+<pre><code>        void pop_back() { --m_size; }</code></pre>
+
+<p>The obvious way to remove element <em>i</em> is to shift every later element down one, which is
+O(chain length). The trick here is that <strong>you do not have to preserve order</strong>. The
+container is called <em>unordered</em>; nothing promises the chain is in any particular sequence. So
+move the last element into the hole and shorten by one: constant time, one move, no shifting.
+Remember this shape &mdash; swap-with-last-and-pop is the standard removal for any unordered
+sequence, and you will use it again in P3 for move lists.</p>
+
+<div class="aside">
+  <span class="label">Two honest limitations of that <code>pop_back</code></span>
+  <p><strong>It does not destroy anything.</strong> Because your buffer came from
+  <code>new T[]</code>, every slot holds a live, fully constructed object; <code>m_size</code> only
+  records how many the caller cares about. So <code>pop_back</code> makes an element unreachable but
+  leaves it alive, holding whatever it owns, until the whole buffer is deleted. For a
+  <code>V</code> that owns a megabyte, an erased entry keeps that megabyte until the map is
+  destroyed. This is the same <code>new T[]</code> consequence you recorded in Lesson 9, showing up
+  in a third place. The fix is still the same one, still deferred: raw storage plus placement
+  <code>new</code> and explicit destructor calls.</p>
+  <p><strong>It does not check for empty.</strong> <code>pop_back()</code> on an empty
+  <code>Vector</code> wraps <code>m_size</code> from 0 to a huge number, because
+  <code>std::size_t</code> is unsigned. Your <code>erase</code> never calls it on an empty chain, so
+  it is currently unreachable &mdash; but note it, because it is exactly the kind of precondition
+  that is fine until someone else calls the function.</p>
+</div>
+
+<h2><span class="num">Verify</span>Order, mutation, and the empty case</h2>
+
+<p>Ten keys inserted as <code>key0</code>&hellip;<code>key9</code>, then iterated. Measured under the
+<code>asan</code> preset:</p>
+
+<pre><code>range-for over the map:
+  key4=4 key1=1 key7=7 key2=2 key5=5 key8=8 key3=3 key6=6 key9=9 key0=0
+  visited 10 entries, values sum to 45
+
+erase key3: 1  again: 0
+size now 9   find key3: not found
+iteration now visits 9
+
+empty map: begin == end -&gt; 1
+empty map iterations: 0
+
+after mutation key7 = 700
+exit 0, no sanitizer report</code></pre>
+
+<p>Four things that transcript proves, and it is worth knowing which line proves which:</p>
+
+<ul>
+  <li><strong>The scrambled order is the headline.</strong> You inserted in order and got them back
+  in none. This is not a defect &mdash; it is <em>why the standard container is named</em>
+  <code>unordered_map</code>. Iteration follows bucket order, and bucket order is hash order, which
+  has no relationship to insertion order or to sorting. If you ever need order, you need
+  <code>std::map</code>, which is a tree, not a table.</li>
+  <li><strong>Sum 45 over 10 entries</strong> means every entry was visited exactly once. A
+  <code>settle()</code> that skipped a non-empty bucket would still print a plausible list; the sum
+  is what catches it.</li>
+  <li><strong><code>erase</code> returns <code>1</code> then <code>0</code></strong> &mdash; removing
+  a key that is there and one that is not are different answers, and the caller can tell.</li>
+  <li><strong><code>begin() == end()</code> on the empty map, with zero iterations.</strong> The case
+  most likely to be wrong, and you wrote no code for it.</li>
+</ul>
+
+<p>The last line is <code>for (auto &amp;e : m) e.value *= 100;</code>, and it works because
+<code>operator*</code> returns <code>Entry&amp;</code>. That is the thing
+<a href="./0011-hash-maps-buckets-and-the-modulo.html"><code>std::optional</code> could not do</a>:
+your <code>find</code> hands back a copy, but your iterator refers to the stored entry, so you can
+write through it. You have just built the more capable of the two return types the standard library
+offers &mdash; which is the honest reason it returns an iterator from <code>find</code>.</p>
+
+<h2><span class="num">Knowledge 2</span>Why <code>std::count_if</code> refuses</h2>
+
+<p>The range-based <code>for</code> works. Now try an algorithm:</p>
+
+<pre><code>std::count_if(m.begin(), m.end(), [](auto &amp;e){ return e.value &gt; 4; });
+
+error: no matching function for call to 'count_if'</code></pre>
+
+<p>Your iterator does everything <code>count_if</code> needs at runtime &mdash; it dereferences, it
+increments, it compares. The refusal is not about capability. It is that
+<strong><code>&lt;algorithm&gt;</code> asks questions about your iterator before it agrees to use
+it</strong>, and your iterator has no answers.</p>
+
+<p>The questions go through <code>std::iterator_traits&lt;It&gt;</code>, which looks for five member
+typedefs. An algorithm needs to know what <code>*it</code> yields so it can name a local variable of
+that type; it needs a type in which to count distances; and above all it needs to know <em>how
+powerful</em> your iterator is, because <code>std::sort</code> must reject a forward-only iterator
+rather than fail mysteriously at runtime.</p>
+
+<p>That last question is answered by the <code>iterator_category</code> tag, and the tags form a
+hierarchy of capability:</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>Category</th><th>Adds</th><th>Yours?</th></tr>
+<tr><td><code>input_iterator_tag</code></td><td>read once, forward</td><td></td></tr>
+<tr><td><code>forward_iterator_tag</code></td><td>multi-pass: read the same range twice</td><td><strong>this one</strong></td></tr>
+<tr><td><code>bidirectional_iterator_tag</code></td><td><code>--it</code></td><td>no &mdash; you cannot walk back to the previous non-empty bucket</td></tr>
+<tr><td><code>random_access_iterator_tag</code></td><td><code>it + n</code>, <code>b - a</code></td><td>no &mdash; that was Lesson 10's <code>T*</code></td></tr>
+</table>
+</div>
+
+<p>This is also the answer to a question Lesson 10 raised and did not settle: why did a raw
+<code>T*</code> work with <code>std::sort</code> with no declarations at all? Because the standard
+library ships a <code>std::iterator_traits</code> specialization for pointers that fills in all five
+answers automatically. <strong>Pointers were never exempt from the requirement &mdash; someone had
+already answered for them.</strong> For your own class, you answer.</p>
+
+<h2><span class="num">Build 3</span>Five typedefs</h2>
+
+<p class="filename">include/containers/hash_map.hpp &mdash; top of the iterator's public section, plus <code>#include &lt;iterator&gt;</code></p>
+<pre><code>            using iterator_category = std::forward_iterator_tag;
+            using value_type        = Entry;
+            using difference_type   = std::ptrdiff_t;
+            using pointer           = Entry *;
+            using reference         = Entry &amp;;
+
+            iterator() = default;          // forward iterators must be default-constructible
+
+            iterator operator++(int)       // post-increment: it++
+            {
+                iterator before = *this;
+                ++(*this);
+                return before;
+            }</code></pre>
+
+<p>The two extras are part of the forward-iterator contract rather than afterthoughts. A forward
+iterator must be default-constructible, and must support both <code>++it</code> and
+<code>it++</code> &mdash; note that post-increment is written in terms of pre-increment, returning a
+copy of the old position, which is why <code>++it</code> is the one to prefer in your own loops.</p>
+
+<p>Measured after those additions, with <code>-Wall -Wextra -Wpedantic -Werror</code>:</p>
+
+<pre><code>count_if value&gt;4: 5
+max: key9 = 9
+distance: 10</code></pre>
+
+<p>Nine lines of declarations, and <code>&lt;algorithm&gt;</code> opened up. Nothing about the
+runtime behaviour changed &mdash; the same increments, the same dereferences. <strong>You did not
+make the iterator more capable; you made it legible.</strong> That is a distinctively C++ move, and
+it is the answer to the Sep 2 checkpoint sentence in full: your iterators now work with STL
+algorithms, on both containers, for a reason you can explain.</p>
+
+<h2><span class="num">Skill</span>Retrieval</h2>
+
+<div class="quiz" data-quiz data-title="Check yourself">
+  <ol class="quiz-items">
+    <li class="quiz-q" data-answer="2" data-explain="The iterator holds a bucket index and a position within that bucket's chain, plus a pointer to the table so it can find the next occupied bucket. One number cannot describe a position in a ragged table.">
+      <p class="quiz-prompt">Why does this iterator hold two indices?</p>
+      <ul class="quiz-options">
+        <li>To detect a stale table</li>
+        <li>A chain, and a place in it</li>
+        <li>To support moving backward</li>
+        <li>One counts the erased slots</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="4" data-explain="settle() walks m_bucket forward while the current chain is exhausted. On an empty map every chain is exhausted, so it runs to the bucket count, which is exactly the end position. begin() == end() with no special case.">
+      <p class="quiz-prompt">How does the empty map get <code>begin() == end()</code>?</p>
+      <ul class="quiz-options">
+        <li>A size check inside begin</li>
+        <li>Both return a null table</li>
+        <li>The constructor short-circuits</li>
+        <li>settle runs off the table</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="1" data-explain="The container is unordered, so nothing promises chain order. Moving the last element into the hole and shortening by one removes in constant time instead of shifting every later element.">
+      <p class="quiz-prompt">Why does <code>erase</code> swap with the last element?</p>
+      <ul class="quiz-options">
+        <li>Order need not be kept</li>
+        <li>Shifting would invalidate</li>
+        <li>The last one is cached</li>
+        <li>It avoids a reallocation</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="3" data-explain="Algorithms query std::iterator_traits for five typedefs - value type, difference type, pointer, reference, and the category tag saying how capable the iterator is. Without them the call does not compile.">
+      <p class="quiz-prompt">Why did <code>count_if</code> reject the iterator?</p>
+      <ul class="quiz-options">
+        <li>It lacked a subtraction operator</li>
+        <li>The lambda took a reference</li>
+        <li>Its traits were not declared</li>
+        <li>The category was too weak</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="2" data-explain="The standard library ships an iterator_traits specialization for pointer types, so all five answers already existed. Pointers were never exempt from the requirement.">
+      <p class="quiz-prompt">Why did a raw <code>T*</code> need no typedefs in Lesson 10?</p>
+      <ul class="quiz-options">
+        <li>Algorithms special-case pointers</li>
+        <li>A traits specialization exists</li>
+        <li>Built-in types skip the check</li>
+        <li>Its category is deduced later</li>
+      </ul>
+    </li>
+  </ol>
+</div>
+
+<div class="recall" data-recall>
+  <p class="recall-front">Out loud: your map's iteration order has no relationship to the order you
+  inserted. Say why, say what that means for the container's name, and say what you would reach for
+  if you did need order.</p>
+  <p class="recall-back">Iteration walks buckets in index order and each chain in storage order, and
+  a key's bucket is its hash modulo the bucket count &mdash; a number with no relationship to
+  insertion time or to the key's sort position. Rehashing scrambles it again. That is why the
+  standard container is called <code>unordered_map</code>: unordered is a documented guarantee that
+  you must not depend on any order, not an accident of implementation. If I needed sorted iteration
+  I would use <code>std::map</code>, which is a balanced binary tree &mdash; ordered iteration and
+  O(log n) lookup, rather than unordered iteration and O(1).</p>
+</div>
+
+<div class="source">
+  <p><strong>Read this one first.</strong> cppreference's <code>iterator_traits</code> page is short
+  and is the actual specification of what you just declared; the iterator-category page below it
+  explains the hierarchy the tags encode.</p>
+
+  <div class="table-wrap">
+  <table>
+  <tr><th>This lesson</th><th>Read</th></tr>
+  <tr>
+    <td>Knowledge 2 &mdash; the five typedefs</td>
+    <td><a href="https://en.cppreference.com/w/cpp/iterator/iterator_traits">std::iterator_traits</a></td>
+  </tr>
+  <tr>
+    <td>Build 3 &mdash; the category tags</td>
+    <td><a href="https://en.cppreference.com/w/cpp/iterator/iterator_tags">Iterator tags</a>, <a href="https://en.cppreference.com/w/cpp/named_req/ForwardIterator">the ForwardIterator requirements</a></td>
+  </tr>
+  <tr>
+    <td>Build 1 &mdash; <code>operator-&gt;</code></td>
+    <td><a href="https://www.learncpp.com/cpp-tutorial/overloading-the-parenthesis-operator/">learncpp &mdash; operator overloading</a>, and the <a href="https://en.cppreference.com/w/cpp/language/operator_member_access">member access operators</a> page for the repeated-application rule</td>
+  </tr>
+  <tr>
+    <td>The authority to cite in review</td>
+    <td><a href="https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rc-standard">C.160/C.168</a> on operator overloading conventions, and <a href="https://en.cppreference.com/w/cpp/container/unordered_map/erase">unordered_map::erase</a> for what the standard promises about invalidation on erase.</td>
+  </tr>
+  </table>
+  </div>
+</div>
+
+<footer>
+  <h2>Where this sits</h2>
+  <p>Before: <a href="./0012-load-factor-and-rehash.html">Lesson 12 &mdash; Load Factor and
+  Rehash</a>. With this lesson <code>HashMap&lt;K,V&gt;</code> is feature-complete for the
+  deliverable: insert, find, erase, iterate, grow.</p>
+  <p>Reference: <a href="../reference/glossary.html">Glossary</a> &mdash; add <em>iterator
+  category</em>, <em>traits</em>, <em>swap-and-pop</em>.
+  <a href="./0010-iterators-and-the-crash-that-names-its-cause.html">Lesson 10</a> is where the
+  pointer-iterator question this lesson answers was first raised.</p>
+  <p>Next: <strong>measurement</strong>. Both containers are done, and every claim you have made
+  about them so far &mdash; amortized O(1), the cost of chaining, where the standard library wins
+  &mdash; is currently an argument rather than a number. Lesson 14 is <code>&lt;chrono&gt;</code> and
+  the benchmark, which is the last piece of the Sep 16 deliverable.</p>
+  <p class="ask">Ask me anything here that did not land. The two that usually need a second pass are
+  why <code>settle()</code> belongs in the constructor as well as in <code>operator++</code>, and why
+  five typedefs change what compiles when they change nothing about what the code does.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

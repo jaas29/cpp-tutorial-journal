@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 10 &mdash; Iterators, and the Crash That Names Its Own Cause</title>
+<meta name="description" content="Six lines give your Vector begin() and end(), and std::sort starts working on it. Then the same six lines let you reproduce iterator invalidation under ASan, with grow() named in the stack trace.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<link rel="stylesheet" href="../assets/quiz.css">
+</head>
+<body>
+
+<p class="kicker">Lesson 10 &middot; Weeks 3&ndash;4 &middot; Project 1</p>
+<h1>Iterators, and the Crash That Names Its Own Cause</h1>
+<p class="standfirst">The Sep 2 checkpoint asked for &ldquo;iterators that work with STL
+algorithms.&rdquo; That sounds like a class you have to write. It is six lines, and four of them are
+<code>return</code>. The reason it takes a lesson anyway is the second half: those same six lines let
+you reproduce <strong>iterator invalidation</strong> on demand, and read a sanitizer report that
+points straight at <code>grow()</code>. Your mission says you want to look at a crash and know which
+of three bugs it is. This is you manufacturing one of the three on purpose.</p>
+
+<h2><span class="num">Knowledge 1</span>An iterator is not a type. It is a set of operations.</h2>
+
+<p>This is the first place your Java instincts will actively mislead you. In Java,
+<code>Iterator</code> is an <em>interface</em>: a named thing with <code>hasNext()</code> and
+<code>next()</code>, and your class implements it or it does not.</p>
+
+<p>C++ has no such interface. An iterator is anything that <strong>supports the operations the
+algorithm uses</strong>. <code>std::sort</code> does not ask &ldquo;do you implement
+<code>Iterator</code>?&rdquo; &mdash; it is a template, so it simply writes <code>*it</code>,
+<code>++it</code>, <code>it != last</code>, <code>it + n</code> into its body and lets the compiler
+find out whether those compile for your type. If they do, you are an iterator. Nobody registered
+anything.</p>
+
+<p>Now look at what a raw <code>T*</code> already supports:</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>The algorithm writes</th><th>On a <code>T*</code> this means</th><th>Works?</th></tr>
+<tr><td><code>*it</code></td><td>dereference the pointer</td><td>yes, built in</td></tr>
+<tr><td><code>++it</code></td><td>advance by <code>sizeof(T)</code> bytes</td><td>yes, built in</td></tr>
+<tr><td><code>it != last</code></td><td>compare two addresses</td><td>yes, built in</td></tr>
+<tr><td><code>it + n</code>, <code>it - first</code></td><td>pointer arithmetic</td><td>yes, built in</td></tr>
+</table>
+</div>
+
+<p><strong>A raw pointer is already a fully-featured random-access iterator.</strong> The language
+gave you one for free the moment you allocated an array. Your job is not to build an iterator; it is
+to <em>hand out</em> the two you already have.</p>
+
+<div class="aside">
+  <span class="label">Is that really how <code>std::vector</code> does it?</span>
+  <p>Close enough that the difference is not about capability. Most real implementations wrap the
+  pointer in a thin class so that (a) <code>Vector&lt;int&gt;::iterator</code> and
+  <code>int*</code> are distinct types, which makes overloading and error messages behave, and (b)
+  debug builds can bounds-check. libstdc++ calls the wrapper
+  <code>__normal_iterator</code>. It is the same pointer inside, with the same arithmetic. Starting
+  from the raw pointer is the honest version of the idea, and upgrading to a wrapper later changes
+  no caller.</p>
+</div>
+
+<h2><span class="num">Knowledge 2</span>Why <code>end()</code> points past the last element</h2>
+
+<p>Every C++ range is <strong>half-open</strong>: <code>[begin, end)</code>. <code>begin()</code>
+points at element 0; <code>end()</code> points at the slot <em>after</em> the last element, which
+holds nothing you may read.</p>
+
+<svg viewBox="0 0 560 140" width="100%" height="140" role="img" aria-label="A five-slot buffer with begin pointing at slot 0 and end pointing one past slot 4">
+  <rect x="60" y="40" width="72" height="44" class="svg-box"/>
+  <rect x="132" y="40" width="72" height="44" class="svg-box"/>
+  <rect x="204" y="40" width="72" height="44" class="svg-box"/>
+  <rect x="276" y="40" width="72" height="44" class="svg-box"/>
+  <rect x="348" y="40" width="72" height="44" class="svg-box"/>
+  <text x="96"  y="68" text-anchor="middle" class="svg-mono svg-ink" font-size="14">10</text>
+  <text x="168" y="68" text-anchor="middle" class="svg-mono svg-ink" font-size="14">20</text>
+  <text x="240" y="68" text-anchor="middle" class="svg-mono svg-ink" font-size="14">30</text>
+  <text x="312" y="68" text-anchor="middle" class="svg-mono svg-ink" font-size="14">40</text>
+  <text x="384" y="68" text-anchor="middle" class="svg-mono svg-ink" font-size="14">50</text>
+  <line x1="420" y1="40" x2="420" y2="84" class="svg-rule" stroke-dasharray="4 3"/>
+  <path d="M 60 100 L 60 112" class="svg-stroke"/>
+  <text x="60" y="128" text-anchor="middle" class="svg-mono svg-accent" font-size="12">begin()</text>
+  <path d="M 420 100 L 420 112" class="svg-stroke"/>
+  <text x="424" y="128" text-anchor="start" class="svg-mono svg-accent" font-size="12">end() &mdash; m_data + m_size</text>
+  <text x="60" y="30" text-anchor="start" class="svg-mono svg-faint" font-size="11">m_size = 5</text>
+</svg>
+
+<p>Three things fall out of that choice, and they are why every container in the standard library
+uses it:</p>
+
+<ul>
+  <li><strong>The empty range is not a special case.</strong> When <code>m_size</code> is 0,
+  <code>begin()</code> and <code>end()</code> are the same address, so
+  <code>while (it != end)</code> runs zero times with no extra test. A closed range
+  <code>[first, last]</code> would need &ldquo;unless it is empty&rdquo; written into every
+  loop.</li>
+  <li><strong>The count is the subtraction.</strong> <code>end() - begin()</code> is exactly the
+  number of elements. No off-by-one anywhere.</li>
+  <li><strong>Forming the address is legal; reading it is not.</strong> The standard specifically
+  permits computing a one-past-the-end pointer of an array. Dereferencing it is undefined behaviour.
+  So <code>end()</code> is a legal value that exists only to be compared against.</li>
+</ul>
+
+<h2><span class="num">Build 1</span>Six lines, plus the <code>const</code> one you owe from Monday</h2>
+
+<p class="filename">include/containers/vector.hpp &mdash; in the public section, next to <code>operator[]</code></p>
+<pre><code>        T &amp;operator[](std::size_t index) { return m_data[index]; }
+        const T &amp;operator[](std::size_t index) const { return m_data[index]; }
+
+        using iterator = T *;
+        using const_iterator = const T *;
+
+        iterator begin() { return m_data; }
+        iterator end()   { return m_data + m_size; }
+
+        const_iterator begin() const { return m_data; }
+        const_iterator end()   const { return m_data + m_size; }</code></pre>
+
+<p>Note <code>m_size</code>, not <code>m_capacity</code>. The buffer may have eight slots while you
+have stored three values; the other five were default-constructed by <code>new T[]</code> and mean
+nothing. An iterator range must cover the elements you stored, never the slots you own.</p>
+
+<h3>The <code>const</code> half, which is the part actually worth understanding</h3>
+
+<p>You have four functions above where two would do, and the duplication is not laziness. Try the
+old header with a <code>const</code> vector and the compiler tells you precisely what is wrong:</p>
+
+<pre><code>$ clang++ -std=c++20 -Iinclude -fsyntax-only probe.cpp
+error: no viable overloaded operator[] for type 'const containers::Vector&lt;int&gt;'
+    3 | void probe(const containers::Vector&lt;int&gt; &amp;v) { (void)v[0]; }
+      |                                                       ~^~
+include/containers/vector.hpp:29:12: note: candidate function not viable: 'this' argument
+      has type 'const containers::Vector&lt;int&gt;', but method is not marked const</code></pre>
+
+<p>Read the note carefully, because it explains the whole mechanism. Every member function has a
+hidden first parameter, <code>this</code>. In <code>T &amp;operator[](std::size_t)</code> that
+parameter is <code>Vector*</code>. Writing <code>const</code> <em>after</em> the parameter list
+changes it to <code>const Vector*</code> &mdash; that trailing <code>const</code> applies to
+<code>this</code>, which is why it appears in such an odd position.</p>
+
+<p>A <code>const Vector&amp;</code> will not bind to a function whose <code>this</code> is
+non-<code>const</code>, because that would silently throw away a promise. So a <code>const</code>
+vector cannot call any of your non-<code>const</code> members &mdash; not <code>operator[]</code>,
+and until now not <code>size()</code> either, had you not marked it. It is a hard wall, and the only
+way through is to supply the <code>const</code> overload.</p>
+
+<p>The return types differ for the same reason. <code>const T&amp;</code> hands back a reference the
+caller cannot assign through, so <code>cv[0] = 9</code> fails to compile rather than quietly
+mutating something the caller promised not to touch.</p>
+
+<div class="aside">
+  <span class="label">Why this matters more than it looks</span>
+  <p>Almost every function you will write from P2 onward takes its arguments as
+  <code>const Something&amp;</code> &mdash; that is the default way to pass a non-trivial object in
+  C++, and Core Guideline
+  <a href="https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rf-in">F.16</a> says so
+  outright. A container that cannot be read through a <code>const</code> reference cannot be passed
+  to any of them. Missing <code>const</code> overloads do not fail locally; they fail at every future
+  call site.</p>
+</div>
+
+<h2><span class="num">Verify</span>Algorithms you never wrote, running on a container you did</h2>
+
+<p>Add this to <code>tests/main.cpp</code>, with <code>#include &lt;algorithm&gt;</code> and
+<code>#include &lt;numeric&gt;</code> at the top:</p>
+
+<pre><code>    containers::Vector&lt;int&gt; v;
+    for (int x : {50, 20, 40, 10, 30}) v.push_back(x);
+
+    std::sort(v.begin(), v.end());
+    for (int x : v) std::cout &lt;&lt; x &lt;&lt; " ";          // range-for, see below
+    std::cout &lt;&lt; "\n";
+
+    auto it = std::find(v.begin(), v.end(), 40);
+    std::cout &lt;&lt; "found at index " &lt;&lt; (it - v.begin()) &lt;&lt; "\n";
+    std::cout &lt;&lt; "sum " &lt;&lt; std::accumulate(v.begin(), v.end(), 0) &lt;&lt; "\n";
+
+    const containers::Vector&lt;int&gt; &amp;cv = v;           // the const path
+    std::cout &lt;&lt; "cv[0] " &lt;&lt; cv[0]
+              &lt;&lt; "  count " &lt;&lt; std::count(cv.begin(), cv.end(), 30) &lt;&lt; "\n";</code></pre>
+
+<p>Measured, <code>-Wall -Wextra -Wpedantic -Werror</code>, Apple clang 17:</p>
+
+<pre><code>10 20 30 40 50
+found at index 3
+sum 150
+max 50
+cv[0] 10  count 1</code></pre>
+
+<p>Sit with that for a second. <code>std::sort</code> is an introsort &mdash; quicksort that falls
+back to heapsort at depth, then insertion sort at the tail &mdash; written years ago by people who
+have never seen your header. It just sorted your hand-rolled buffer. You did not implement an
+interface, register a type, or inherit from anything. You supplied two pointers, and every
+<a href="https://en.cppreference.com/w/cpp/algorithm">algorithm in <code>&lt;algorithm&gt;</code></a>
+became available at once. <strong>That is what people mean when they say C++ generic programming is
+structural rather than nominal.</strong></p>
+
+<h3>The range-based <code>for</code> came free too</h3>
+
+<p>You did not add anything to make <code>for (int x : v)</code> work. It compiles because the
+language <em>defines</em> that loop as a rewrite:</p>
+
+<pre><code>for (int x : v) { ... }
+
+// the compiler expands this to roughly:
+auto &amp;&amp; range = v;
+auto first = range.begin();
+auto last  = range.end();
+for (; first != last; ++first) { int x = *first; ... }</code></pre>
+
+<p>Members named exactly <code>begin</code> and <code>end</code> are the entire contract. Name them
+<code>start</code> and <code>finish</code> and the loop stops compiling. This is a pattern you will
+meet repeatedly in C++: a language feature defined as a rewrite into ordinary calls, which your own
+type can satisfy.</p>
+
+<h2><span class="num">Knowledge 3</span>The bug you just made possible</h2>
+
+<p>Handing out pointers into your buffer hands out something that can outlive the buffer. Here is
+the whole bug in seven lines:</p>
+
+<p class="filename">inv.cpp</p>
+<pre><code>    containers::Vector&lt;int&gt; v;
+    v.push_back(1);
+    v.push_back(2);                 // size 2, capacity 2 - full
+
+    int *p = v.begin();             // points into the current buffer
+    std::cout &lt;&lt; "before: " &lt;&lt; *p &lt;&lt; "\n";
+
+    v.push_back(3);                 // grow() reallocates; p now dangles
+    std::cout &lt;&lt; "after:  " &lt;&lt; *p &lt;&lt; "\n";</code></pre>
+
+<p><code>grow()</code> does what Lesson 5 taught it to do: allocate a new buffer, move the elements
+across, <code>delete[]</code> the old one. <code>p</code> still holds the <em>old</em> address. It
+now points at freed memory. This is <strong>iterator invalidation</strong>, and it is the third of
+the three failures in your mission statement &mdash; not a double free, not a leak, but a live
+pointer into a buffer that moved out from under it.</p>
+
+<p>Run it under the <code>asan</code> preset. Real output, trimmed to the two stacks that matter:</p>
+
+<pre><code>==40071==ERROR: AddressSanitizer: heap-use-after-free on address 0x602000000130
+READ of size 4 at 0x602000000130 thread T0
+    #0 0x000100cfcb60 in main inv.cpp:9
+
+0x602000000130 is located 0 bytes inside of 8-byte region [0x602000000130,0x602000000138)
+freed by thread T0 here:
+    #0 ... in _ZdaPv                                  &lt;-- operator delete[]
+    #1 0x000100cfd444 in containers::Vector&lt;int&gt;::grow()      vector.hpp:130
+    #2 0x000100cfce4c in containers::Vector&lt;int&gt;::push_back(int const&amp;) vector.hpp:23
+    #3 0x000100cfcae4 in main                                  inv.cpp:8</code></pre>
+
+<p>Learn to read this shape, because you will see it for the rest of the term. It is two stacks, not
+one, and the second is the valuable one:</p>
+
+<ul>
+  <li><strong>The first stack is where you got caught</strong> &mdash; <code>inv.cpp:9</code>, the
+  read through <code>p</code>. That is the symptom, and it is the only line a debugger would have
+  shown you.</li>
+  <li><strong>&ldquo;freed by thread T0 here&rdquo; is where the damage was done</strong> &mdash;
+  line 8, one line earlier, inside a <code>push_back</code> that looks completely innocent.
+  <strong>ASan remembered the free and replayed it for you.</strong> Without it you would be staring
+  at line 9 asking why a pointer you set two lines ago is wrong.</li>
+  <li><strong>Note that reading <code>p</code> on line 7 was fine.</strong> The pointer was valid,
+  then an unrelated-looking operation made it invalid. Nothing about <code>p</code> changed.</li>
+</ul>
+
+<p>The rule this teaches, which you should be able to say without notes:
+<strong>any operation that can reallocate invalidates every iterator, pointer and reference into the
+container.</strong> For your <code>Vector</code>, that is <code>push_back</code>. cppreference states
+the same rule for <code>std::vector</code>, and
+<a href="https://en.cppreference.com/w/cpp/container/vector/push_back">says so on the
+<code>push_back</code> page</a> &mdash; this is not a flaw in your implementation, it is the
+documented behaviour of the real one. You have just reproduced it from the inside.</p>
+
+<div class="aside">
+  <span class="label">Before you reach for a fix</span>
+  <p>There isn't one, at this level. <code>std::vector</code> does not prevent this either &mdash;
+  it documents it. The professional answer is an index instead of an iterator when you intend to
+  mutate while traversing, plus a sanitizer build as part of your normal loop so that when it does
+  happen you find out in one second rather than one afternoon. That is why the
+  <code>asan</code> preset exists in this repo.</p>
+</div>
+
+<h2><span class="num">Skill</span>Retrieval</h2>
+
+<div class="quiz" data-quiz data-title="Check yourself">
+  <ol class="quiz-items">
+    <li class="quiz-q" data-answer="3" data-explain="C++ generic programming is structural. std::sort is a template; it writes *it, ++it and it != last into its body, and whether your type is an iterator is decided by whether those expressions compile. No interface, no registration, no inheritance.">
+      <p class="quiz-prompt">How does <code>std::sort</code> decide your type is an iterator?</p>
+      <ul class="quiz-options">
+        <li>It checks an implemented interface</li>
+        <li>It looks up a registered trait</li>
+        <li>It uses the required operations</li>
+        <li>It requires a common base</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="1" data-explain="end() is m_data + m_size, one slot past the last element. Forming that address is legal; dereferencing it is undefined. It exists to be compared against, which is what makes the empty range need no special case.">
+      <p class="quiz-prompt">What does <code>end()</code> point at?</p>
+      <ul class="quiz-options">
+        <li>One slot past the last</li>
+        <li>The final stored element</li>
+        <li>The last allocated slot</li>
+        <li>The buffer's final byte</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="4" data-explain="A trailing const applies to the hidden this parameter, changing it from Vector* to const Vector*. That is the only reason a const Vector& can bind to the call at all.">
+      <p class="quiz-prompt">What does the trailing <code>const</code> apply to?</p>
+      <ul class="quiz-options">
+        <li>The value being returned</li>
+        <li>Every member being read</li>
+        <li>The index parameter given</li>
+        <li>The hidden this pointer</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="2" data-explain="The range-for is defined as a rewrite into calls to members named exactly begin and end. Supply those two names and the loop compiles; rename them and it stops.">
+      <p class="quiz-prompt">Why did <code>for (int x : v)</code> compile with no extra work?</p>
+      <ul class="quiz-options">
+        <li>Vector is a standard container</li>
+        <li>It expands to begin and end</li>
+        <li>The element type is simple</li>
+        <li>The compiler unrolls the loop</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="1" data-explain="grow() deletes the old buffer, so any pointer taken before the reallocation now refers to freed memory. ASan reports it as heap-use-after-free and shows a second stack for where the free happened.">
+      <p class="quiz-prompt">Why did <code>push_back</code> break a pointer taken earlier?</p>
+      <ul class="quiz-options">
+        <li>Growth frees the old buffer</li>
+        <li>The element was moved twice</li>
+        <li>Size passed the capacity check</li>
+        <li>The pointer was never const</li>
+      </ul>
+    </li>
+  </ol>
+</div>
+
+<div class="recall" data-recall>
+  <p class="recall-front">Out loud, as if Prof. Roy asked in review: your <code>Vector</code> hands
+  out raw <code>T*</code> as its iterator. Defend that, and then say what the real
+  <code>std::vector</code> does differently and why.</p>
+  <p class="recall-back">A <code>T*</code> already supports every operation a random-access iterator
+  needs &mdash; dereference, increment, comparison, arithmetic &mdash; so it satisfies the
+  requirement with no wrapper. Real implementations wrap it in a thin class for two reasons, neither
+  of them capability: it makes <code>Vector&lt;int&gt;::iterator</code> a distinct type from
+  <code>int*</code> so overloading and diagnostics behave, and it gives a debug build somewhere to
+  put bounds checks. The wrapper holds the same pointer and compiles to the same code, and swapping
+  it in later changes nothing at any call site.</p>
+</div>
+
+<div class="source">
+  <p><strong>Read this one first.</strong> learncpp's iterators chapter is the shortest correct
+  explanation of the half-open range, and it uses pointers-as-iterators as its first example, which
+  is exactly what you just built.</p>
+
+  <div class="table-wrap">
+  <table>
+  <tr><th>This lesson</th><th>Read (learncpp)</th><th>Reference</th></tr>
+  <tr>
+    <td>Knowledge 1&ndash;2 &mdash; iterators, half-open ranges</td>
+    <td><a href="https://www.learncpp.com/cpp-tutorial/introduction-to-iterators/">Introduction to iterators</a></td>
+    <td><a href="https://en.cppreference.com/w/cpp/iterator">Iterator library</a></td>
+  </tr>
+  <tr>
+    <td>Build 1 &mdash; the <code>const</code> overloads</td>
+    <td><a href="https://www.learncpp.com/cpp-tutorial/const-class-objects-and-const-member-functions/">Const objects and const member functions</a></td>
+    <td><a href="https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rconst-fct">Con.2</a> &mdash; make member functions <code>const</code> by default</td>
+  </tr>
+  <tr>
+    <td>Verify &mdash; the range-based <code>for</code> rewrite</td>
+    <td><a href="https://www.learncpp.com/cpp-tutorial/range-based-for-loops-for-each/">Range-based for loops</a></td>
+    <td>&mdash;</td>
+  </tr>
+  <tr>
+    <td>Knowledge 3 &mdash; invalidation</td>
+    <td>&mdash;</td>
+    <td><a href="https://en.cppreference.com/w/cpp/container/vector/push_back">vector::push_back</a> &mdash; the invalidation clause, in the standard's own words</td>
+  </tr>
+  </table>
+  </div>
+</div>
+
+<footer>
+  <h2>Where this sits</h2>
+  <p>Before: <a href="./0009-vector-t-and-the-bug-int-was-hiding.html">Lesson 9 &mdash;
+  <code>Vector&lt;T&gt;</code></a>. With this lesson, <code>Vector&lt;T&gt;</code> meets the Sep 2
+  checkpoint in full and Weeks 1&ndash;2 are closed.</p>
+  <p>Reference: <a href="../reference/vector-internals.html">Vector internals</a> &mdash; needs an
+  iterator row and the invalidation rule.
+  <a href="../reference/glossary.html">Glossary</a> &mdash; add <em>half-open range</em>,
+  <em>iterator invalidation</em>, <em>structural typing</em>.</p>
+  <p>Next: <a href="./0011-hash-maps-buckets-and-the-modulo.html">Lesson 11 &mdash;
+  <code>HashMap&lt;K,V&gt;</code></a>. The bucket array will be your own <code>Vector</code>, so
+  everything you just built gets used from the other side. And the bucket iterator in Lesson 13 is
+  the harder version of what you wrote today: <code>++</code> that has to walk off the end of one
+  bucket and find the next non-empty one.</p>
+  <p class="ask">Ask me anything here that did not land. The two that usually need a second pass are
+  why the trailing <code>const</code> sits after the parameter list rather than before the return
+  type, and why forming the <code>end()</code> address is legal when reading it is not.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

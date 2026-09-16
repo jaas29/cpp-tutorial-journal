@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 11 &mdash; Buckets, and the One Line That Makes It a Map</title>
+<meta name="description" content="A hash map is an array plus one modulo. Build HashMap<K,V> on top of your own Vector with separate chaining, std::hash, and std::optional lookups - and learn why collisions are the normal case, not the error case.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<link rel="stylesheet" href="../assets/quiz.css">
+</head>
+<body>
+
+<p class="kicker">Lesson 11 &middot; Weeks 3&ndash;4 &middot; Project 1</p>
+<h1>Buckets, and the One Line That Makes It a Map</h1>
+<p class="standfirst">A hash map looks like a different kind of object from an array. It is not. It is
+an array, plus one line that turns a key into an index into it. Everything else in this lesson
+&mdash; chains, load factor, rehashing &mdash; exists to handle the fact that <em>that line cannot
+be injective</em>. Get the one line first, and the rest follows as damage control.</p>
+
+<h2><span class="num">Knowledge 1</span>An array you can index with a string</h2>
+
+<p>You already have a container you index with a number: <code>v[3]</code> goes straight to the
+fourth slot, one multiply and one add, no searching. That is the fastest lookup there is, and the
+only reason it is fast is that <strong>the index <em>is</em> the address arithmetic</strong>.</p>
+
+<p>The whole idea of a hash map is to keep that, and buy your way into it from a key that is not a
+number:</p>
+
+<pre><code>index = hash(key) % bucket_count;     // a string goes in, a slot number comes out
+table[index]                          // and now it is just an array access</code></pre>
+
+<p>That is it. That is the data structure. <code>std::unordered_map</code>,
+Java's <code>HashMap</code>, Python's <code>dict</code> &mdash; all of them are that line, plus
+decades of care about what happens when it goes wrong.</p>
+
+<h2><span class="num">Knowledge 2</span><code>std::hash</code>, and why it is written with braces</h2>
+
+<p>You do not write the hash function. The standard library ships one for every built-in type and
+for <code>std::string</code>. But it is spelled oddly, and the spelling tells you what it is:</p>
+
+<pre><code>std::hash&lt;K&gt;{}(key)
+//       ^^^  ^^ ^^^^^
+//        |    |    the call
+//        |    construct a temporary object of that type
+//        the class template</code></pre>
+
+<p><code>std::hash&lt;std::string&gt;</code> is a <strong>class</strong>, not a function. The
+<code>{}</code> default-constructs a nameless temporary, and then <code>(key)</code> calls that
+object's <code>operator()</code>. An object you can call like a function is a <strong>function
+object</strong>, or <em>functor</em>. The library uses a class rather than a plain function because a
+class can be specialized per type &mdash; which is exactly how you will teach it about your own types
+later, and how it already knows about <code>std::string</code>.</p>
+
+<p>What comes out is a <code>std::size_t</code>, and on this machine it is enormous. Measured:</p>
+
+<pre><code>jose     14301728753766726926    % 8 = 6
+roy      13235723348464347652    % 8 = 4
+ada      10190926678592913505    % 8 = 1
+grace    12564494891154384730    % 8 = 2
+alan     13208046377741452544    % 8 = 0
+cat       8210903754520128248    % 8 = 0</code></pre>
+
+<p>Two properties matter, and only two:</p>
+
+<ul>
+  <li><strong>Deterministic.</strong> The same key always produces the same number, so you can find
+  the value again. Without this the structure does not work at all.</li>
+  <li><strong>Well spread.</strong> Similar keys should produce wildly different numbers. Look at
+  <code>ada</code> and <code>alan</code> above: two characters in common, and nothing in common in
+  the output. That spread is what keeps chains short.</li>
+</ul>
+
+<div class="aside">
+  <span class="label">One honest thing about <code>std::hash&lt;int&gt;</code></span>
+  <p>Measured on this machine:</p>
+  <pre><code>1 -&gt; 1        42 -&gt; 42        1000 -&gt; 1000</code></pre>
+  <p>It is the <strong>identity function</strong>. The standard permits this, and libc++ does it,
+  because for most integer key sets it is both free and good enough. But it has teeth: it means the
+  spread property above is entirely absent for <code>int</code> keys, and any structure in your keys
+  survives into the bucket index. Insert the multiples of 8 into an 8-bucket table and every single
+  one lands in bucket 0 &mdash; one chain, zero buckets used, a linked list wearing a hash map
+  costume. This is a real, reproducible worst case, and it is the reason Lesson 12 will have
+  something to say about choosing <code>bucket_count</code>. Note it now; do not fix it now.</p>
+</div>
+
+<h2><span class="num">Knowledge 3</span>Collisions are the normal case</h2>
+
+<p>Look again at the table above. <code>alan</code> and <code>cat</code> both produce bucket 0. Two
+different keys, one slot. That is a <strong>collision</strong>, and the first instinct &mdash; treat
+it as an error, or pick a better hash to avoid it &mdash; is wrong on both counts.</p>
+
+<p>It is wrong because it is arithmetically impossible to avoid. You are mapping an unbounded set of
+keys onto 8 slots. By the pigeonhole principle there is no hash function, however brilliant, that
+avoids collisions. And you do not need many keys before they are near-certain: with 8 buckets, the
+odds that 5 random keys all land in different buckets is about 21%. <strong>The question is never
+&ldquo;how do I avoid collisions&rdquo; but &ldquo;what do I do when one happens,&rdquo; and the
+answer defines your whole implementation.</strong></p>
+
+<h3>The design decision, and how to defend it in review</h3>
+
+<p>Two families of answer, and you need to be able to say both:</p>
+
+<div class="table-wrap">
+<table>
+<tr><th></th><th>Separate chaining</th><th>Open addressing</th></tr>
+<tr><td>On collision</td><td>each bucket holds a <em>list</em> of entries; append to it</td><td>probe forward to the next free slot; entries live in the one array</td></tr>
+<tr><td>Memory</td><td>one allocation per bucket that gets used</td><td>one flat array, nothing else</td></tr>
+<tr><td>Cache behaviour</td><td>worse &mdash; following a chain jumps around memory</td><td>better &mdash; probing reads adjacent memory</td></tr>
+<tr><td>Erase</td><td>easy &mdash; remove from the chain</td><td>hard &mdash; a hole breaks later probes, so you need <em>tombstones</em></td></tr>
+<tr><td>At high load</td><td>degrades gracefully</td><td>degrades sharply near full</td></tr>
+</table>
+</div>
+
+<p><strong>Build separate chaining.</strong> Two reasons, and give them in this order if asked:</p>
+
+<ol class="steps">
+  <li><strong>Erase is correct by construction.</strong> Open addressing's tombstones are the
+  classic source of a hash map that is subtly wrong for a long time before anyone notices &mdash;
+  delete an entry, and a key whose probe sequence ran through that slot becomes unfindable. That is
+  a bug you would rather not be hunting this week.</li>
+  <li><strong>It is what <code>std::unordered_map</code> does</strong>, and not by accident: the
+  standard requires reference stability and bucket iteration, which effectively mandates chaining.
+  So your comparison in the writeup is like-for-like, and where the standard library beats you it
+  will be for reasons you can actually name rather than &ldquo;different algorithm.&rdquo;</li>
+</ol>
+
+<p>And say the cost out loud, because it is the honest half: chaining is the slower of the two on
+modern hardware for lookup-heavy work, because chasing a chain is a cache miss and probing is not.
+The fast hash maps people reach for in production &mdash; <code>absl::flat_hash_map</code>,
+<code>boost::unordered_flat_map</code> &mdash; are open-addressed for exactly that reason. You are
+choosing correctness-under-time-pressure over throughput, deliberately, and that is a defensible
+engineering call as long as you are the one who says it first.</p>
+
+<h2><span class="num">Build 1</span><code>HashMap&lt;K,V&gt;</code>, on top of your own <code>Vector</code></h2>
+
+<p>The bucket array is a <code>Vector</code>, and each chain is a <code>Vector</code>. Your
+container from Weeks 1&ndash;2 is the substrate for the one in Weeks 3&ndash;4 &mdash; which is worth
+noticing, because it means everything you fixed in Lessons 6 through 10 is now load-bearing
+underneath this.</p>
+
+<svg viewBox="0 0 560 210" width="100%" height="210" role="img" aria-label="Eight buckets, most holding one entry, bucket zero holding a chain of two">
+  <text x="0" y="16" class="svg-mono svg-faint" font-size="11">m_buckets &mdash; Vector&lt;Vector&lt;Entry&gt;&gt;</text>
+  <g>
+    <rect x="0" y="28" width="46" height="26" class="svg-box"/><text x="23" y="46" text-anchor="middle" class="svg-mono svg-soft" font-size="11">0</text>
+    <rect x="0" y="54" width="46" height="26" class="svg-box"/><text x="23" y="72" text-anchor="middle" class="svg-mono svg-soft" font-size="11">1</text>
+    <rect x="0" y="80" width="46" height="26" class="svg-box"/><text x="23" y="98" text-anchor="middle" class="svg-mono svg-soft" font-size="11">2</text>
+    <rect x="0" y="106" width="46" height="26" class="svg-box"/><text x="23" y="124" text-anchor="middle" class="svg-mono svg-soft" font-size="11">3</text>
+    <rect x="0" y="132" width="46" height="26" class="svg-box"/><text x="23" y="150" text-anchor="middle" class="svg-mono svg-soft" font-size="11">4</text>
+    <rect x="0" y="158" width="46" height="26" class="svg-box"/><text x="23" y="176" text-anchor="middle" class="svg-mono svg-soft" font-size="11">5</text>
+  </g>
+  <path d="M 50 41 L 76 41" class="svg-stroke"/>
+  <rect x="80" y="28" width="104" height="26" class="svg-box"/><text x="132" y="46" text-anchor="middle" class="svg-mono svg-ink" font-size="11">alan / 41</text>
+  <path d="M 188 41 L 206 41" class="svg-stroke"/>
+  <rect x="210" y="28" width="104" height="26" class="svg-box"/><text x="262" y="46" text-anchor="middle" class="svg-mono svg-ink" font-size="11">cat / 9</text>
+  <text x="326" y="46" class="svg-mono svg-accent" font-size="11">&larr; the collision</text>
+  <path d="M 50 93 L 76 93" class="svg-stroke"/>
+  <rect x="80" y="80" width="104" height="26" class="svg-box"/><text x="132" y="98" text-anchor="middle" class="svg-mono svg-ink" font-size="11">grace / 85</text>
+  <path d="M 50 145 L 76 145" class="svg-stroke"/>
+  <rect x="80" y="132" width="104" height="26" class="svg-box"/><text x="132" y="150" text-anchor="middle" class="svg-mono svg-ink" font-size="11">roy / 45</text>
+  <text x="80" y="72" class="svg-mono svg-faint" font-size="10">ada / 36</text>
+  <text x="80" y="198" class="svg-mono svg-faint" font-size="10">buckets 3 and 5 are empty &mdash; a Vector with size 0, holding no allocation</text>
+</svg>
+
+<p class="filename">include/containers/hash_map.hpp &mdash; new file</p>
+<pre><code>#pragma once
+#include &lt;containers/vector.hpp&gt;
+#include &lt;cstddef&gt;
+#include &lt;functional&gt;   // std::hash
+#include &lt;optional&gt;
+
+namespace containers
+{
+    template &lt;typename K, typename V&gt;
+    class HashMap
+    {
+        struct Entry
+        {
+            K key{};        // the braces matter - see the note below
+            V value{};
+        };
+
+        Vector&lt;Vector&lt;Entry&gt;&gt; m_buckets;   // one chain per bucket
+        std::size_t m_size = 0;            // total pairs stored, not buckets used
+
+    public:
+        explicit HashMap(std::size_t bucket_count = 8)
+        {
+            for (std::size_t i = 0; i &lt; bucket_count; ++i)
+                m_buckets.push_back(Vector&lt;Entry&gt;{});
+        }
+
+        std::size_t size() const { return m_size; }
+        std::size_t bucket_count() const { return m_buckets.size(); }
+
+        std::size_t bucket_for(const K &amp;key) const
+        {
+            return std::hash&lt;K&gt;{}(key) % m_buckets.size();
+        }
+
+        void insert(const K &amp;key, const V &amp;value)
+        {
+            Vector&lt;Entry&gt; &amp;chain = m_buckets[bucket_for(key)];
+
+            for (std::size_t i = 0; i &lt; chain.size(); ++i)   // already present?
+                if (chain[i].key == key)
+                {
+                    chain[i].value = value;                  // overwrite
+                    return;                                  // m_size unchanged
+                }
+
+            chain.push_back(Entry{key, value});
+            ++m_size;
+        }
+
+        std::optional&lt;V&gt; find(const K &amp;key) const
+        {
+            const Vector&lt;Entry&gt; &amp;chain = m_buckets[bucket_for(key)];
+            for (std::size_t i = 0; i &lt; chain.size(); ++i)
+                if (chain[i].key == key)
+                    return chain[i].value;
+            return std::nullopt;
+        }
+    };
+}</code></pre>
+
+<p>Four things in there are worth stopping on.</p>
+
+<p><strong>The <code>&amp;</code> in <code>Vector&lt;Entry&gt; &amp;chain</code> is load-bearing.</strong>
+Drop it and you get a <em>copy</em> of the chain; you then push into the copy, the copy is destroyed
+at the end of the function, and your insert silently does nothing. Your deep copy constructor from
+Lesson 7 would be working perfectly, and the bug would be entirely yours. This is the single most
+common way this header goes wrong.</p>
+
+<p><strong><code>const Vector&lt;Entry&gt; &amp;chain</code> in <code>find</code> is why Lesson 10
+had to happen first.</strong> <code>find</code> is <code>const</code>, so
+<code>m_buckets[...]</code> calls your <code>const</code> <code>operator[]</code> and yields a
+<code>const Vector&lt;Entry&gt;&amp;</code>, and then <code>chain[i]</code> needs a <code>const</code>
+<code>operator[]</code> too. Without yesterday's six lines this function does not compile at all.</p>
+
+<p><strong><code>K key{}</code> rather than <code>K key;</code>.</strong> Lesson 9 Knowledge 4:
+<code>new T[n]</code> default-constructs every slot, so <code>Entry</code> must be
+default-constructible, and an uninitialised <code>V value;</code> for <code>V = int</code> would be
+an indeterminate value that UBSan will eventually catch you reading. The braces zero-initialize.</p>
+
+<p><strong><code>explicit</code> on the constructor.</strong> Without it,
+<code>HashMap&lt;std::string,int&gt; m = 8;</code> compiles &mdash; the compiler would treat your
+constructor as an implicit conversion from <code>size_t</code>. <code>explicit</code> says this
+constructor may only be invoked deliberately.
+(<a href="https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rc-explicit">Core Guidelines
+C.46</a>: by default, declare single-argument constructors <code>explicit</code>.)</p>
+
+<h2><span class="num">Knowledge 4</span><code>std::optional</code>, and what it costs you</h2>
+
+<p>&ldquo;Find a key that might not be there&rdquo; is the problem every language solves differently
+and most solve badly. Java returns <code>null</code> and you find out at runtime. C would return a
+pointer and you would hope the caller checks it.</p>
+
+<p><code>std::optional&lt;V&gt;</code> is a <code>V</code> <em>and</em> a <code>bool</code>, in one
+object, where the language will not let you reach the <code>V</code> without going past the
+<code>bool</code>:</p>
+
+<pre><code>    if (auto age = ages.find("jose"))      // converts to bool: was there a value?
+        std::cout &lt;&lt; *age;                 // only reachable inside the if
+
+    if (!ages.find("nobody"))
+        std::cout &lt;&lt; "not found\n";</code></pre>
+
+<p>There is no null to forget. The check and the access are the same expression, and the value lives
+inside the <code>optional</code> itself &mdash; no separate allocation, no indirection.</p>
+
+<div class="aside">
+  <span class="label">Where the standard library wins, and put this in the writeup</span>
+  <p><code>std::unordered_map::find</code> does <em>not</em> return an
+  <code>optional</code>. It returns an <strong>iterator</strong>, and that is strictly more
+  capable in two ways your version cannot match:</p>
+  <ul>
+    <li>Yours returns a <strong>copy</strong> of the value. For <code>int</code> that is free; for a
+    <code>V</code> that owns a megabyte, every lookup deep-copies a megabyte. An iterator refers to
+    the stored value and copies nothing.</li>
+    <li>Yours is <strong>read-only</strong>. You cannot write through a copy, so
+    <code>m.find(k)-&gt;second = 5</code> has no equivalent, and neither does erase-what-you-found.</li>
+  </ul>
+  <p>The syllabus asks for <code>optional</code> here, and it is the right teaching order &mdash; it
+  is the version where the failure case is impossible to ignore. But know the trade, because
+  &ldquo;why does the real one return an iterator?&rdquo; is exactly the question a reviewer asks,
+  and &ldquo;because mine copies the value and cannot mutate it&rdquo; is the answer that shows you
+  understood the choice rather than inherited it.</p>
+</div>
+
+<h2><span class="num">Verify</span>Five keys, one overwrite, one collision</h2>
+
+<pre><code>    containers::HashMap&lt;std::string, int&gt; ages;
+    ages.insert("jose", 21);
+    ages.insert("roy", 45);
+    ages.insert("ada", 36);
+    ages.insert("grace", 85);
+    ages.insert("alan", 41);
+    ages.insert("jose", 22);        // overwrite - must NOT become a sixth entry
+
+    if (auto a = ages.find("jose")) std::cout &lt;&lt; "jose -&gt; " &lt;&lt; *a &lt;&lt; "\n";
+    if (!ages.find("nobody"))       std::cout &lt;&lt; "nobody -&gt; not found\n";</code></pre>
+
+<p>Measured, Apple clang 17, <code>-Wall -Wextra -Wpedantic -Werror</code>:</p>
+
+<pre><code>size 5  buckets 8
+jose -&gt; 22
+nobody -&gt; not found
+distribution: 1 1 1 0 1 0 1 0</code></pre>
+
+<p><strong>Then force the collision</strong>, because the distribution above never hit one and an
+untested branch is an untested branch &mdash; that is the lesson of the last three blocks. Insert
+<code>alan</code> and <code>cat</code>, which the table in Knowledge 2 shows both hash to bucket 0.
+Under the <code>asan</code> preset (ASan + UBSan, Homebrew clang):</p>
+
+<pre><code>size 2
+bucket 0 chain length 2
+alan -&gt; 41
+cat  -&gt; 9
+exit 0, no sanitizer report</code></pre>
+
+<p>Two entries, one bucket, both retrievable. That is chaining working. Add a
+<code>chain_length(std::size_t)</code> accessor to see it &mdash; it is a debugging window into the
+structure, and you will want it again in Lesson 12 when the load factor starts mattering.</p>
+
+<h2><span class="num">Skill</span>Retrieval</h2>
+
+<div class="quiz" data-quiz data-title="Check yourself">
+  <ol class="quiz-items">
+    <li class="quiz-q" data-answer="4" data-explain="std::hash<K> is a class template, not a function. The braces default-construct a temporary object of that class, and the parentheses then invoke its operator(). An object callable like a function is a function object.">
+      <p class="quiz-prompt">Why is it <code>std::hash&lt;K&gt;{}(key)</code> and not <code>std::hash(key)</code>?</p>
+      <ul class="quiz-options">
+        <li>The braces initialize the key</li>
+        <li>It avoids an extra header</li>
+        <li>The type cannot be deduced</li>
+        <li>It is a class, not a function</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="2" data-explain="Unboundedly many keys are mapped onto finitely many buckets, so by the pigeonhole principle no hash function can avoid collisions. The design question is only what happens when one occurs.">
+      <p class="quiz-prompt">Why can no hash function avoid collisions?</p>
+      <ul class="quiz-options">
+        <li>The modulo discards high bits</li>
+        <li>More keys than available slots</li>
+        <li>Hashes must stay cheap enough</li>
+        <li>Keys are compared by equality</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="1" data-explain="Without the reference you bind a copy of the chain, push into the copy, and destroy it at the end of the function. The insert silently does nothing, and the deep copy constructor doing its job correctly is what makes it invisible.">
+      <p class="quiz-prompt">What breaks if <code>chain</code> is not a reference?</p>
+      <ul class="quiz-options">
+        <li>Inserts vanish into a copy</li>
+        <li>The bucket index goes stale</li>
+        <li>Two entries share one slot</li>
+        <li>The chain is freed too early</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="3" data-explain="std::optional<V> holds a copy of the value and is read-only, so lookups on an expensive V copy it, and there is no way to mutate or erase what you found. An iterator refers to the stored element instead.">
+      <p class="quiz-prompt">What does returning <code>optional&lt;V&gt;</code> cost you?</p>
+      <ul class="quiz-options">
+        <li>A heap allocation per lookup</li>
+        <li>The ability to store nulls</li>
+        <li>Copies, and cannot mutate</li>
+        <li>Constant-time average lookup</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="2" data-explain="libc++ implements std::hash<int> as the identity function, so integer keys carry their structure straight into the bucket index. Multiples of the bucket count all land in one bucket.">
+      <p class="quiz-prompt">What is <code>std::hash&lt;int&gt;</code> on this machine?</p>
+      <ul class="quiz-options">
+        <li>A multiply-and-shift mix</li>
+        <li>The identity, unchanged</li>
+        <li>A cryptographic digest</li>
+        <li>A seeded random permutation</li>
+      </ul>
+    </li>
+  </ol>
+</div>
+
+<div class="recall" data-recall>
+  <p class="recall-front">Out loud, as if Prof. Roy asked in review: you chose separate chaining.
+  Defend it, and say what you gave up.</p>
+  <p class="recall-back">Chaining makes erase correct by construction &mdash; open addressing needs
+  tombstones, and a deleted slot that breaks a later probe sequence is a subtle, long-lived bug I
+  did not want to be hunting in a four-week project. It is also what <code>std::unordered_map</code>
+  does, effectively mandated by the standard's reference-stability and bucket-iteration
+  requirements, so my benchmark compares like with like. What I gave up is throughput: following a
+  chain is a cache miss where probing reads adjacent memory, which is why the fast production maps
+  &mdash; <code>absl::flat_hash_map</code>, <code>boost::unordered_flat_map</code> &mdash; are all
+  open-addressed. I traded lookup speed for correctness under a deadline, on purpose.</p>
+</div>
+
+<div class="source">
+  <p><strong>Read this one first.</strong> cppreference's <code>unordered_map</code> page is the
+  requirements document for this block, exactly as the mission says &mdash; read the top summary and
+  the <em>Iterator invalidation</em> and <em>bucket interface</em> sections, not the whole thing.</p>
+
+  <div class="table-wrap">
+  <table>
+  <tr><th>This lesson</th><th>Read</th><th>Authority</th></tr>
+  <tr>
+    <td>Knowledge 2 &mdash; <code>std::hash</code></td>
+    <td><a href="https://en.cppreference.com/w/cpp/utility/hash">std::hash</a></td>
+    <td>&mdash;</td>
+  </tr>
+  <tr>
+    <td>Knowledge 3 &mdash; the structure</td>
+    <td><a href="https://en.cppreference.com/w/cpp/container/unordered_map">std::unordered_map</a> &mdash; the requirements document</td>
+    <td>&mdash;</td>
+  </tr>
+  <tr>
+    <td>Knowledge 4 &mdash; <code>optional</code></td>
+    <td><a href="https://www.learncpp.com/cpp-tutorial/stdoptional/">learncpp &mdash; std::optional</a></td>
+    <td><a href="https://en.cppreference.com/w/cpp/utility/optional">cppreference</a></td>
+  </tr>
+  <tr>
+    <td>Build 1 &mdash; <code>explicit</code></td>
+    <td><a href="https://www.learncpp.com/cpp-tutorial/converting-constructors-and-the-explicit-keyword/">learncpp &mdash; converting constructors and explicit</a></td>
+    <td><a href="https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rc-explicit">C.46</a></td>
+  </tr>
+  </table>
+  </div>
+</div>
+
+<footer>
+  <h2>Where this sits</h2>
+  <p>Before: <a href="./0010-iterators-and-the-crash-that-names-its-cause.html">Lesson 10 &mdash;
+  Iterators</a>, whose <code>const</code> overloads are what let <code>find</code> compile.</p>
+  <p>Reference: <a href="../reference/glossary.html">Glossary</a> &mdash; add <em>bucket</em>,
+  <em>chain</em>, <em>collision</em>, <em>function object</em>, <em>load factor</em>.</p>
+  <p>Next: <a href="./0012-load-factor-and-rehash.html">Lesson 12 &mdash; Load Factor and
+  Rehash</a>. Your <code>bucket_count</code> is currently fixed at 8 forever, which means the
+  &ldquo;constant time&rdquo; claim for this structure is false as written &mdash; at 800 entries
+  every lookup walks a chain of 100. Lesson 12 makes the table grow, and record 0009 says to exercise
+  it with an owning <code>T</code> from the very first test, because rehashing is the same
+  relocate-and-destroy operation as <code>grow()</code>.</p>
+  <p class="ask">Ask me anything here that did not land. The two that usually need a second pass are
+  why <code>std::hash</code> is a class rather than a function, and why dropping the
+  <code>&amp;</code> on <code>chain</code> produces a bug with no crash and no warning.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

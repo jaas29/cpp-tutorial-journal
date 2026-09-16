@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 14 &mdash; Measuring It, and the Preset That Lies</title>
+<meta name="description" content="Benchmark both containers against the standard library with <chrono>. The dev preset says your vector beats std::vector by 2.4x. At -O2 it does not. Then find out why insert is 5x slower, by counting copies.">
+<link rel="stylesheet" href="../assets/lesson.css">
+<link rel="stylesheet" href="../assets/quiz.css">
+</head>
+<body>
+
+<p class="kicker">Lesson 14 &middot; Weeks 3&ndash;4 &middot; Project 1</p>
+<h1>Measuring It, and the Preset That Lies</h1>
+<p class="standfirst">Every performance claim you have made in this project so far has been an
+argument. Amortized O(1), the cost of chaining, where the standard library wins &mdash; all reasoned,
+none measured. This is the lesson that turns them into numbers, and the first number you get says
+your hand-written vector is <strong>2.4&times; faster than <code>std::vector</code></strong>. It is
+not. Finding out why that number is a lie is more valuable than the benchmark itself.</p>
+
+<h2><span class="num">Knowledge 1</span>How to time something without fooling yourself</h2>
+
+<p>Four rules, and each one exists because skipping it produces a confidently wrong number.</p>
+
+<h3>1. Use <code>steady_clock</code></h3>
+
+<pre><code>using clk = std::chrono::steady_clock;
+
+auto a = clk::now();
+work();
+auto b = clk::now();
+double milliseconds = std::chrono::duration&lt;double, std::milli&gt;(b - a).count();</code></pre>
+
+<p><code>&lt;chrono&gt;</code> gives you three clocks and only one is for this.
+<code>system_clock</code> is wall-clock time, which NTP can adjust <em>mid-measurement</em> &mdash; it
+can run backwards. <code>steady_clock</code> is guaranteed to only move forward at a constant rate,
+which is exactly and only what a duration needs.</p>
+
+<p>The <code>duration&lt;double, std::milli&gt;</code> cast is deliberate too: subtracting two time
+points gives a duration in the clock's native tick, which is nanoseconds here. Converting to
+<code>double</code> milliseconds keeps fractions instead of truncating them to integers.</p>
+
+<h3>2. Take a median of several runs, not one run</h3>
+
+<p>The first run pays for cold caches and page faults, and any run can be interrupted by the
+scheduler. One measurement measures your machine's mood. Five runs and take the middle one: the
+median discards a single outlier in either direction, where a mean would absorb it.</p>
+
+<h3>3. Stop the optimizer deleting the work</h3>
+
+<pre><code>volatile std::size_t sink = 0;
+// ... at the end of each timed block:
+sink += v.size();</code></pre>
+
+<p>At <code>-O2</code> the compiler is entitled to delete any computation whose result nobody
+observes. Build a vector, never read it, and a good optimizer removes the entire loop &mdash; and you
+measure 0.00 ms and believe it. Writing into a <code>volatile</code> forbids that: the compiler must
+assume the variable can be observed from outside the program, so the work that feeds it has to
+happen. This is the standard trick and it is worth recognising in other people's benchmarks.</p>
+
+<h3>4. Benchmark the build people will actually run</h3>
+
+<p>Which is the next section, because it is the one that would have caught you out.</p>
+
+<h2><span class="num">Knowledge 2</span>Your two presets are both wrong for this</h2>
+
+<p>Look at what <code>p1-containers</code> can currently build:</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>Preset</th><th>Flags</th><th>Optimization</th></tr>
+<tr><td><code>dev</code></td><td><code>-g -fno-omit-frame-pointer -fsanitize=undefined</code></td><td><strong>none</strong></td></tr>
+<tr><td><code>asan</code></td><td>the above plus <code>-fsanitize=address</code></td><td><strong>none</strong></td></tr>
+</table>
+</div>
+
+<p>Neither passes <code>-O</code> anything, so both are unoptimized, and one is also carrying
+sanitizer instrumentation on every memory access. That has been exactly right for four weeks &mdash;
+you have been hunting correctness bugs, and unoptimized builds give honest line numbers. It is
+completely wrong for measuring speed.</p>
+
+<p>Here is the same benchmark, same machine, same minute, under the <code>dev</code> preset and then
+at <code>-O2</code>:</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>200,000 operations</th><th><code>dev</code> preset</th><th><code>-O2 -DNDEBUG</code></th></tr>
+<tr><td><code>vector</code> push_back</td><td><strong>0.41&times;</strong> &mdash; mine is 2.4&times; <em>faster</em></td><td><strong>1.09&times;</strong> &mdash; mine is 9% slower</td></tr>
+<tr><td>hashmap insert</td><td>2.38&times; slower</td><td><strong>5.36&times; slower</strong></td></tr>
+<tr><td>hashmap lookup (hits)</td><td>0.85&times;</td><td>0.86&times;</td></tr>
+</table>
+</div>
+
+<p>The first row is the whole point. Under <code>dev</code>, the measurement says you beat the
+standard library by more than a factor of two. That result is not noise and it is not a mistake in
+the timing code &mdash; it is a real property of that build, and it is <strong>meaningless</strong>.
+<code>std::vector</code> is an enormous stack of small inlinable abstractions: iterators wrapping
+pointers, allocator indirection, <code>__builtin</code> calls. At <code>-O0</code> every one of those
+layers is a real function call that really executes. Your <code>Vector</code> is three members and a
+loop, so it has almost nothing to inline away. <strong>You did not measure a faster container. You
+measured a shorter abstraction tower against an optimizer that was switched off.</strong></p>
+
+<p>And the deception runs in both directions: the same <code>dev</code> preset made your hash map
+look 2.38&times; slower when the truth is 5.36&times;. It flattered you where you were losing and
+flattered you where you were winning. <strong>An unoptimized benchmark is not a pessimistic
+benchmark, it is an unrelated one.</strong></p>
+
+<div class="aside">
+  <span class="label">Add a third preset</span>
+  <p>You need a <code>release</code> preset in <code>CMakePresets.json</code>, and it is worth having
+  beyond this week &mdash; P2 is the performance project and every number in it will need this.</p>
+<pre><code>{
+  "name": "release",
+  "displayName": "Optimized build (Apple clang, -O2) - for benchmarking only",
+  "binaryDir": "${sourceDir}/build/release",
+  "cacheVariables": {
+    "CMAKE_BUILD_TYPE": "Release",
+    "CMAKE_CXX_COMPILER": "/usr/bin/clang++"
+  }
+}</code></pre>
+  <p><code>CMAKE_BUILD_TYPE: Release</code> supplies <code>-O3 -DNDEBUG</code> on its own &mdash; you
+  do not write the flags. And note what is <em>absent</em>: no sanitizers. Never benchmark a
+  sanitizer build and never ship a correctness claim from a release build. They answer different
+  questions, which is why they are different presets.</p>
+</div>
+
+<h2><span class="num">Verify</span>The real numbers</h2>
+
+<p>Apple clang 17, <code>-O2 -DNDEBUG</code>, median of 5, 200,000 operations, macOS 26.5 arm64.
+Ratios above 1.00 mean the standard library wins:</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>Operation</th><th>Mine (ms)</th><th>std (ms)</th><th>Ratio</th></tr>
+<tr><td><code>vector</code> push_back, 200k <code>int</code></td><td>0.21</td><td>0.19</td><td>1.09&times;</td></tr>
+<tr><td>hashmap insert, 200k <code>string</code> keys</td><td>59.35</td><td>11.08</td><td><strong>5.36&times;</strong></td></tr>
+<tr><td>hashmap lookup, 200k hits</td><td>3.09</td><td>3.60</td><td><strong>0.86&times;</strong></td></tr>
+<tr><td>hashmap lookup, 200k misses</td><td>5.58</td><td>8.83</td><td><strong>0.63&times;</strong></td></tr>
+</table>
+</div>
+
+<p>Three results, and the two surprising ones are the interesting ones.</p>
+
+<p><strong>The vector is a real result.</strong> Within 9% of <code>std::vector</code> for
+<code>int</code> push_back. That is not a moral victory &mdash; it is what should happen, because at
+<code>-O2</code> both compile down to roughly the same bounds check, store and increment. It says
+your growth strategy is right and you are not doing anything stupid per element.</p>
+
+<p><strong>Your lookup beats the standard library, and you can explain why.</strong> 0.86&times; on
+hits, 0.63&times; on misses, and both come from decisions in Lesson 12:</p>
+
+<ul>
+  <li>Your <code>max_load_factor</code> is <strong>0.75</strong>; libc++'s default is
+  <strong>1.0</strong>. Shorter chains, fewer comparisons per lookup.</li>
+  <li>Your bucket count is a <strong>power of two</strong>, so <code>% bucket_count</code> compiles
+  to a single bitmask instruction. libc++ uses <strong>prime</strong> bucket counts, so its modulo is
+  a genuine integer division by a runtime value &mdash; one of the slowest integer operations on the
+  machine.</li>
+</ul>
+
+<p>Notice what that means. The power-of-two bucket count that Lesson 12 called a
+<strong>weakness</strong> is the same decision that is winning here. Both statements are true: it is
+faster on these keys, and it has a pathological case libc++ paid for this speed to avoid. That is
+what an engineering trade-off actually looks like when you measure it rather than argue it, and it
+is the single best thing you have to say in review.</p>
+
+<h2><span class="num">Knowledge 3</span>Finding the cause of the 5.36&times;</h2>
+
+<p>A benchmark that reports a number is half a benchmark. The deliverable asks for &ldquo;an honest
+account of where the standard library wins <em>and why</em>,&rdquo; so the 5.36&times; needs a cause,
+not a shrug. You find it the same way you would find any performance problem: form a hypothesis and
+measure it away.</p>
+
+<p><strong>Hypothesis 1: it is the rehashing.</strong> Test it by giving the map all its buckets up
+front, so no rehash ever fires, and re-timing:</p>
+
+<pre><code>mine, growing from 8       :  84.20 ms
+mine, buckets preallocated :  33.09 ms      &lt;- rehashing was 61% of the time
+std, reserved              :   8.63 ms</code></pre>
+
+<p>Confirmed, and only partly. Rehashing is 61% of insert cost &mdash; but with rehashing entirely
+removed you are still 3.8&times; slower than the standard library. Something else is going on
+per-insert.</p>
+
+<p><strong>Hypothesis 2: you are copying the key more than once.</strong> Timing cannot tell you
+this, so stop timing and start <em>counting</em>. Make a key type that records every operation
+performed on it:</p>
+
+<pre><code>struct Counted {
+    std::string s;
+    static inline int copies = 0, moves = 0, defaults = 0;
+    Counted() { ++defaults; }
+    Counted(const Counted &amp;o) : s(o.s) { ++copies; }
+    Counted(Counted &amp;&amp;o) noexcept : s(std::move(o.s)) { ++moves; }
+    // ... and the two assignment operators, likewise
+};</code></pre>
+
+<p>100 inserts into each map. Measured:</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>100 inserts</th><th>key copies</th><th>key moves</th><th>default-constructions</th></tr>
+<tr><td>Mine</td><td><strong>391</strong></td><td>87</td><td><strong>390</strong></td></tr>
+<tr><td><code>std::unordered_map</code></td><td><strong>100</strong></td><td>100</td><td><strong>0</strong></td></tr>
+</table>
+</div>
+
+<p>There is the answer, and it is much more specific than &ldquo;the standard library is
+optimized.&rdquo; Two distinct causes, both traceable to one line of your code:</p>
+
+<ol class="steps">
+  <li><strong>~4 copies per insert instead of 1.</strong> <code>Entry{key, value}</code> copies the
+  key into a temporary <code>Entry</code>; then <code>push_back(const T&amp;)</code> copies that
+  <code>Entry</code> again into the slot. Two copies before you even count the ones rehashing adds.
+  The standard library does one, because <code>insert</code> takes the pair by value and moves it
+  into place.</li>
+  <li><strong>390 default-constructions that should not exist at all.</strong> You never asked for
+  those. They come from <code>new T[n]</code>, which default-constructs <em>every slot</em> in every
+  buffer &mdash; including the empty ones, and again in every fresh buffer every time a chain or the
+  bucket array grows. <code>std::unordered_map</code> does exactly zero, because it never allocates
+  an object it has not been asked to store.</li>
+</ol>
+
+<p>And both trace to the same root: <strong><code>new T[n]</code> allocates <em>and constructs</em>,
+where the standard library allocates raw bytes and constructs in place.</strong> You wrote that
+limitation down in <a href="./0009-vector-t-and-the-bug-int-was-hiding.html">Lesson 9</a>, met it
+again in <a href="./0013-iterating-a-bucketed-structure.html">Lesson 13</a> when
+<code>pop_back</code> could not destroy anything, and here it is a third time with a price tag
+attached. Three independent symptoms, one cause, now measured.</p>
+
+<p><strong>Do not fix it this week.</strong> The fix is raw storage plus placement <code>new</code>
+plus explicit destructor calls, it touches every member of both containers, and it is five days
+before the deliverable. Write it up instead. &ldquo;Here is my 5.36&times; gap, here is the
+measurement isolating it to 61% rehash and ~4&times; key copies, here is the single root cause, here
+is the named technique that fixes it, and here is why I did not do it in week four&rdquo; is a
+stronger thing to bring to a code review than a faster container would be.</p>
+
+<h2><span class="num">Skill</span>Retrieval</h2>
+
+<div class="quiz" data-quiz data-title="Check yourself">
+  <ol class="quiz-items">
+    <li class="quiz-q" data-answer="3" data-explain="system_clock is wall-clock time and can be adjusted backwards by NTP during a measurement. steady_clock is guaranteed monotonic at a constant rate, which is the only guarantee a duration needs.">
+      <p class="quiz-prompt">Why <code>steady_clock</code> rather than <code>system_clock</code>?</p>
+      <ul class="quiz-options">
+        <li>It has a finer resolution</li>
+        <li>It excludes any idle time</li>
+        <li>It cannot be adjusted backward</li>
+        <li>It reads the counter directly</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="1" data-explain="At -O0 nothing inlines, so std::vector's layered abstractions each cost a real call while a three-member class costs almost nothing. The result measures abstraction depth against a disabled optimizer, not container speed.">
+      <p class="quiz-prompt">Why did the <code>dev</code> preset say your vector wins?</p>
+      <ul class="quiz-options">
+        <li>Nothing was inlined away</li>
+        <li>Sanitizers slowed the heap</li>
+        <li>The loop was deleted entirely</li>
+        <li>Debug info bloated the code</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="4" data-explain="At -O2 a computation whose result is never observed can be deleted entirely. Writing to a volatile forces the compiler to assume the value is observable, so the work feeding it must actually run.">
+      <p class="quiz-prompt">What is the <code>volatile sink</code> for?</p>
+      <ul class="quiz-options">
+        <li>Flushing the cache between runs</li>
+        <li>Keeping the timing thread awake</li>
+        <li>Preventing integer overflow</li>
+        <li>Stopping the work being deleted</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="2" data-explain="Your max_load_factor is 0.75 against libc++'s 1.0, giving shorter chains, and your power-of-two bucket count makes the modulo a single bitmask where libc++'s prime count needs a real integer division.">
+      <p class="quiz-prompt">Why is your lookup faster than libc++'s?</p>
+      <ul class="quiz-options">
+        <li>Chaining beats their probing</li>
+        <li>Shorter chains, cheaper modulo</li>
+        <li>Your hash function is simpler</li>
+        <li>Fewer indirections per bucket</li>
+      </ul>
+    </li>
+    <li class="quiz-q" data-answer="1" data-explain="new T[n] allocates and default-constructs every slot, including ones nothing has been stored in, and does it again for every fresh buffer. std::unordered_map allocates raw bytes and constructs only what it is asked to store.">
+      <p class="quiz-prompt">Where did 390 unrequested constructions come from?</p>
+      <ul class="quiz-options">
+        <li>new T[n] fills every slot</li>
+        <li>Each rehash copies the keys</li>
+        <li>Entry has a default member</li>
+        <li>The chains were copied twice</li>
+      </ul>
+    </li>
+  </ol>
+</div>
+
+<div class="recall" data-recall>
+  <p class="recall-front">Out loud, as if Prof. Roy asked: your hash map inserts 5&times; slower than
+  the standard library's. Account for it &mdash; and do not say &ldquo;theirs is more
+  optimized.&rdquo;</p>
+  <p class="recall-back">Two causes, both measured. Preallocating the buckets so no rehash fires cuts
+  insert time from 84 ms to 33 ms, so rehashing is 61% of it &mdash; my rehash rebuilds the whole
+  table because every bucket index is recomputed. The rest is per-insert: instrumenting the key type
+  shows 391 key copies and 390 default-constructions per 100 inserts, against 100 and 0. The copies
+  are because I build an <code>Entry</code> temporary and then <code>push_back</code> copies it
+  again, where <code>insert</code> takes its pair by value and moves it once. The default
+  constructions are because <code>new T[n]</code> allocates <em>and constructs</em> every slot,
+  including empty buckets and every fresh buffer, where the standard library allocates raw bytes and
+  constructs in place with placement <code>new</code>. Both trace to the same root cause, it is the
+  same one that stops my <code>pop_back</code> destroying anything, and the fix is raw storage plus
+  placement <code>new</code> &mdash; which I deliberately deferred past the deliverable because it
+  touches every member of both containers.</p>
+</div>
+
+<div class="source">
+  <p><strong>Read this one first.</strong> learncpp's <code>&lt;chrono&gt;</code> timing lesson is
+  short, and it is the one that spells out why an unoptimized build must never be used for a timing
+  claim &mdash; the exact trap this lesson walked into.</p>
+
+  <div class="table-wrap">
+  <table>
+  <tr><th>This lesson</th><th>Read</th></tr>
+  <tr>
+    <td>Knowledge 1 &mdash; timing code</td>
+    <td><a href="https://www.learncpp.com/cpp-tutorial/timing-your-code/">learncpp &mdash; Timing your code</a></td>
+  </tr>
+  <tr>
+    <td>The clocks</td>
+    <td><a href="https://en.cppreference.com/w/cpp/chrono/steady_clock">steady_clock</a>, <a href="https://en.cppreference.com/w/cpp/chrono/duration">duration</a></td>
+  </tr>
+  <tr>
+    <td>Knowledge 2 &mdash; what Release supplies</td>
+    <td><a href="https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html">CMAKE_BUILD_TYPE</a></td>
+  </tr>
+  <tr>
+    <td>The authority to cite in review</td>
+    <td><a href="https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rper-measure">Per.6</a> &mdash; don't make performance claims without measurements; <a href="https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rper-Knuth">Per.2</a> &mdash; don't optimize prematurely. The deferred placement-<code>new</code> rework is Per.2 being followed deliberately.</td>
+  </tr>
+  </table>
+  </div>
+</div>
+
+<footer>
+  <h2>Where this sits</h2>
+  <p>Before: <a href="./0013-iterating-a-bucketed-structure.html">Lesson 13 &mdash; Iterating a
+  Bucketed Structure</a>. Both containers are now complete and measured, which is the whole of the
+  Sep 16 deliverable except the writing.</p>
+  <p>Reference: a <code>reference/benchmarking.html</code> sheet is owed &mdash; the four rules, the
+  three presets and what each is for, and the <code>Counted</code> instrument, which you will want
+  again in P2.</p>
+  <p>Next: the <strong>writeup</strong>. Every number you need is now in this lesson. Also owed: a
+  learning record for the preset that lies, because &ldquo;the dev preset reverses the result&rdquo;
+  is exactly the kind of toolchain trap records 0005, 0006 and 0007 exist to capture &mdash; and P2
+  is six weeks of performance work that would have inherited it.</p>
+  <p class="ask">Ask me anything here that did not land. The two that usually need a second pass are
+  why an unoptimized benchmark is unrelated rather than merely pessimistic, and why the same
+  power-of-two bucket count is a weakness in Lesson 12 and an advantage here.</p>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

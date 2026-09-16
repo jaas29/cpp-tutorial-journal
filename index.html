@@ -58,9 +58,19 @@ compiled and ran on my machine; the commands and their output are real, not illu
   <li><a href="./lessons/0007-the-copy-constructor-and-deep-copy.html">Lesson 7 &mdash; The Copy Constructor, and Deep Copy</a>
     <span class="note">Replacing the = delete stopgap with a real copy: a second buffer, the two signatures that will not compile, and the measured truth about the self-assignment guard.</span></li>
   <li><a href="./lessons/0008-move-semantics-and-the-noexcept-that-pays.html">Lesson 8 &mdash; Move Semantics, and the noexcept That Pays</a>
-    <span class="note">The destructor silently deleted both move operations, so every move is a copy. The last two of the five, with allocation counts measured on this machine.</span></li>
+    <span class="note">Your destructor silently deleted both move operations, so every move in the program is a copy. Writing the last two of the five, with the allocation counts measured on this machine.</span></li>
   <li><a href="./lessons/0009-vector-t-and-the-bug-int-was-hiding.html">Lesson 9 &mdash; Vector&lt;T&gt;, and the Bug int Was Hiding</a>
-    <span class="note">Templating is mostly mechanical. What it is for is exposing a wasteful grow() that no Vector&lt;int&gt; test could ever have seen: 43 allocations down to 36.</span></li>
+    <span class="note">Templating the container is mostly mechanical. What it is really for is exposing a wasteful grow() that was invisible while T was int - measured, 43 allocations down to 36.</span></li>
+  <li><a href="./lessons/0010-iterators-and-the-crash-that-names-its-cause.html">Lesson 10 &mdash; Iterators, and the Crash That Names Its Own Cause</a>
+    <span class="note">Six lines give your Vector begin() and end(), and std::sort starts working on it. Then the same six lines let you reproduce iterator invalidation under ASan, with grow() named in the stack trace.</span></li>
+  <li><a href="./lessons/0011-hash-maps-buckets-and-the-modulo.html">Lesson 11 &mdash; Buckets, and the One Line That Makes It a Map</a>
+    <span class="note">A hash map is an array plus one modulo. Build HashMap<K,V> on top of your own Vector with separate chaining, std::hash, and std::optional lookups - and learn why collisions are the normal case, not the error case.</span></li>
+  <li><a href="./lessons/0012-load-factor-and-rehash.html">Lesson 12 &mdash; Load Factor, and Why Rehash Is Not grow()</a>
+    <span class="note">A fixed bucket count makes the O(1) claim false: 800 keys in 8 buckets is a chain of 112. Rehashing fixes it - but it cannot reuse Vector::grow, because every element's index is recomputed rather than preserved.</span></li>
+  <li><a href="./lessons/0013-iterating-a-bucketed-structure.html">Lesson 13 &mdash; Iterating a Bucketed Structure, and the Five Typedefs</a>
+    <span class="note">A hash map iterator holds a position in two dimensions and has to skip empty buckets. Then range-for works but std::count_if does not - and the fix is five typedefs that explain what iterator_traits is for.</span></li>
+  <li><a href="./lessons/0014-measuring-it-and-the-preset-that-lies.html">Lesson 14 &mdash; Measuring It, and the Preset That Lies</a>
+    <span class="note">Benchmark both containers against the standard library with <chrono>. The dev preset says your vector beats std::vector by 2.4x. At -O2 it does not. Then find out why insert is 5x slower, by counting copies.</span></li>
   <li><a href="./lessons/recall-01-weeks-1-2.html">Recall — Weeks 1&ndash;2</a>
     <span class="note">Interactive recall over weeks 1&ndash;2: the build pipeline, CMake, the heap, and the first Vector.</span></li>
 <!-- END:lessons -->
@@ -100,6 +110,9 @@ it. These are the ones where the answer was not in any tutorial.</p>
   <li><a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0007-dev-preset-aborts-silently-on-heap-corruption.md">A heap-corruption abort under the <code>dev</code> preset prints nothing at all</a></li>
   <li><a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0008-the-ordering-is-the-fix-not-the-self-assignment-guard.md">In copy assignment, the ordering is the fix; the self-assignment guard is an optimization</a></li>
   <li><a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0009-a-container-templated-on-int-cannot-see-its-own-copies.md">A container tested only at <code>T = int</code> cannot see its own unnecessary copies</a></li>
+  <li><a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0010-an-unoptimized-benchmark-reverses-the-result.md">An unoptimized benchmark does not understate the result, it reverses it</a></li>
+  <li><a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0011-new-t-array-is-the-root-cause-of-three-separate-symptoms.md"><code>new T[n]</code> is one root cause with three separate symptoms, and now it has a price</a></li>
+  <li><a href="https://github.com/jaas29/cpp-tutorial-journal/blob/main/learning-records/0012-a-median-within-one-run-is-not-a-stable-result.md">A median of five inside one run is not a stable result</a></li>
 <!-- END:records -->
 </ul>
 
